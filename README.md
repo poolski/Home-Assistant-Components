@@ -1,5 +1,8 @@
 # Statistics Outlier Cleaner
 
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=poolski&repository=Home-Assistant-Components&category=integration)
+
 A Home Assistant custom integration for detecting and fixing outlier spikes in long-term statistics — the kind caused by HA restarts, meter replacements, or recorder compaction bugs.
 
 Unlike the built-in Developer Tools > Statistics dialog, this integration:
