@@ -56,7 +56,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up Statistics Outlier Cleaner."""
     _check_sqlite_dialect(hass)
     async_register_commands(hass)
-    _register_panel(hass)
+    await _register_panel(hass)
     _register_services(hass)
     return True
 
@@ -66,9 +66,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _register_panel(hass: HomeAssistant) -> None:
+async def _register_panel(hass: HomeAssistant) -> None:
+    from homeassistant.components.http import StaticPathConfig  # noqa: PLC0415
+
     frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
-    hass.http.register_static_path(PANEL_STATIC_PATH, frontend_dir, cache_headers=False)
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(PANEL_STATIC_PATH, frontend_dir, cache_headers=False)]
+    )
     hass.components.frontend.async_register_built_in_panel(
         component_name="custom",
         sidebar_title=PANEL_TITLE,

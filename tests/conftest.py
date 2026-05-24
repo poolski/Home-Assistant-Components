@@ -21,6 +21,7 @@ _HA_STUBS = [
     "homeassistant.exceptions",
     "homeassistant.helpers",
     "homeassistant.helpers.typing",
+    "homeassistant.components.http",
     "homeassistant.util",
     "homeassistant.util.dt",
     "voluptuous",
