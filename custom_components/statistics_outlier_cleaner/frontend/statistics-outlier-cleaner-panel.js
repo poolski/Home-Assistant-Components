@@ -194,17 +194,17 @@ const STYLES = `
     border-radius: 3px;
   }
   .method-help {
-    margin-top: 10px;
+    margin-top: 4px;
+    margin-bottom: 12px;
     padding: 10px 14px;
+    border: 1px solid var(--divider-color, #e0e0e0);
     border-left: 3px solid var(--primary-color, #03a9f4);
-    background: var(--secondary-background-color, #f5f5f5);
-    border-radius: 0 6px 6px 0;
+    border-radius: 4px;
     font-size: 0.85rem;
     line-height: 1.5;
   }
   .method-help.warn {
     border-left-color: var(--warning-color, #f59e0b);
-    background: #fffbeb;
   }
   .method-help h4 { margin: 0 0 6px; font-size: 0.875rem; font-weight: 600; }
   .method-help p { margin: 4px 0; }
