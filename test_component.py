@@ -140,6 +140,8 @@ def test_panel_class_name(panel_js):
 
 def test_panel_uses_ha_statistic_picker(panel_js):
     assert "ha-statistic-picker" in panel_js
+    # statisticTypes must be set as a JS property (array), not an HTML attribute
+    assert "statisticTypes" in panel_js
 
 
 def test_panel_uses_ha_date_range_picker(panel_js):

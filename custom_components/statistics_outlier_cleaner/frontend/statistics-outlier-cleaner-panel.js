@@ -131,11 +131,47 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._hass = hass;
     if (firstSet) {
       this._render();
+      this._initHaComponents();
       this._loadHistory();
     }
     // Forward hass to HA child components
     for (const el of this.shadowRoot.querySelectorAll("ha-statistic-picker, ha-date-range-picker")) {
       el.hass = hass;
+    }
+  }
+
+  // Wait for HA lazy-loaded elements to upgrade, then set JS properties.
+  _initHaComponents() {
+    const picker = this._q("stat-picker");
+    const datePicker = this._q("date-picker");
+
+    const init = () => {
+      // statisticTypes must be an array property, not a string attribute
+      picker.statisticTypes = ["sum"];
+      picker.hass = this._hass;
+
+      // ha-date-range-picker needs Date objects, not strings
+      const end = new Date();
+      const start = new Date(end.getTime() - 30 * 86_400_000);
+      this._startDate = start;
+      this._endDate = end;
+      datePicker.startDate = start;
+      datePicker.endDate = end;
+      datePicker.hass = this._hass;
+    };
+
+    // If elements are already upgraded (common after first panel load), init immediately.
+    // Otherwise wait for the custom element registry — HA loads these lazily.
+    const pickerDefined = customElements.get("ha-statistic-picker");
+    const datePickerDefined = customElements.get("ha-date-range-picker");
+
+    if (pickerDefined && datePickerDefined) {
+      init();
+    } else {
+      Promise.all([
+        pickerDefined ? Promise.resolve() : customElements.whenDefined("ha-statistic-picker"),
+        datePickerDefined ? Promise.resolve() : customElements.whenDefined("ha-date-range-picker"),
+      ]).then(init);
     }
   }
 
@@ -156,10 +192,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         <div class="form-row">
           <div class="form-group" style="flex:1;min-width:280px">
             <label>Statistic</label>
-            <ha-statistic-picker
-              id="stat-picker"
-              statistic-types="sum"
-            ></ha-statistic-picker>
+            <ha-statistic-picker id="stat-picker"></ha-statistic-picker>
           </div>
         </div>
 
@@ -249,18 +282,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       this._statId = e.detail.value;
     });
 
-    // ha-date-range-picker fires "value-changed" with { startDate, endDate } (Date objects)
+    // ha-date-range-picker fires "value-changed"; shape varies by HA version
     this._q("date-picker").addEventListener("value-changed", (e) => {
-      this._startDate = e.detail.value?.startDate ?? null;
-      this._endDate   = e.detail.value?.endDate   ?? null;
+      const d = e.detail.value ?? e.detail;
+      this._startDate = d?.startDate ?? null;
+      this._endDate   = d?.endDate   ?? null;
     });
 
-    // Forward hass if already set
-    if (this._hass) {
-      for (const el of this.shadowRoot.querySelectorAll("ha-statistic-picker, ha-date-range-picker")) {
-        el.hass = this._hass;
-      }
-    }
   }
 
   _q(id) { return this.shadowRoot.getElementById(id); }
