@@ -81,8 +81,8 @@ The fix ID is logged at INFO level after every `clean_outliers` call.
 
 ## Detection methods
 
-| Method   | When to use | Safe for automation? |
-| -------- | ----------- | -------------------- |
+| Method | When to use | Safe for automation? |
+| --- | --- | --- |
 | `mad` | General-purpose. Flags rows whose [modified z-score](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm) ≥ `mad_factor`. Conservative: returns nothing when the sensor is flat. | ✅ Yes |
 | `absolute` | You know the maximum plausible change (e.g. 100 kWh/h). Flags `\|change\| ≥ threshold`. | ✅ Yes |
 | `top_n` | Matches the built-in dev tools behaviour. Always returns the N largest changes — will flag normal data if there are no real spikes. | ⚠️ Manual use only |
