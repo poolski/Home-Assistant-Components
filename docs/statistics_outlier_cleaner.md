@@ -89,11 +89,95 @@ The fix ID is logged at INFO level after every `clean_outliers` call.
 
 ## Detection methods
 
+Three methods are available. Two are safe to use in automations; one is manual-only.
+
 | Method | When to use | Safe for automation? |
 | --- | --- | --- |
-| `mad` | General-purpose. Flags rows whose [modified z-score](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm) ≥ `mad_factor`. Conservative: returns nothing when the sensor is flat. | ✅ Yes |
-| `absolute` | You know the maximum plausible change (e.g. 100 kWh/h). Flags `\|change\| ≥ threshold`. | ✅ Yes |
-| `top_n` | Matches the built-in dev tools behaviour. Always returns the N largest changes — will flag normal data if there are no real spikes. | ⚠️ Manual use only |
+| `mad` | General-purpose spike detection. Conservative — returns nothing on flat data. | ✅ Yes |
+| `absolute` | You know the maximum plausible change for your sensor. | ✅ Yes |
+| `top_n` | Matches the built-in dev tools behaviour. **Always** returns N rows, even if the data is clean. | ⚠️ Manual only |
+
+---
+
+### `mad` — Median Absolute Deviation
+
+**How it works:** Computes the [modified z-score](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm) for every row's `change` value. Rows whose score exceeds `mad_factor` are flagged. The score is based on how far a value deviates from the median, scaled by the median absolute deviation of the whole dataset.
+
+**Key property:** If the sensor readings are flat or near-uniform (e.g. a solar panel at night), MAD returns zero results rather than flagging normal values. This makes it the safest choice for scheduled automations.
+
+**Parameter:** `mad_factor` (default `6`). Higher values are more conservative — only extreme outliers are flagged. Lower values cast a wider net.
+
+| `mad_factor` | Behaviour |
+| --- | --- |
+| `3` | Aggressive — flags moderate spikes, may catch normal variation |
+| `6` | Balanced (recommended) — catches clear spikes, ignores noise |
+| `10` | Conservative — only flags very large spikes |
+
+**Example — electricity meter, automation use:**
+
+```yaml
+action: statistics_outlier_cleaner.clean_outliers
+data:
+  statistic_id: sensor.electricity_meter_energy
+  method: mad
+  mad_factor: 6
+  lookback_days: 30
+  replacement: 0
+```
+
+A typical electricity meter accumulates ~0.5–2 kWh/h. A restart spike of 500 kWh would have a modified z-score in the thousands — flagged immediately. A slightly noisy hour at 2.5 kWh when the median is 1.2 kWh would not be flagged.
+
+---
+
+### `absolute` — Fixed threshold
+
+**How it works:** Flags any row where `|change| ≥ threshold`. Simple and predictable — if you know the physical maximum your sensor can legitimately register in one period, set `threshold` just above it.
+
+**When to use it:** Sensors with a well-defined physical ceiling. For example:
+- A solar inverter that can output at most 10 kW → max 10 kWh in an hour → `threshold: 10`
+- A gas meter where 5 m³/h is physically impossible → `threshold: 5`
+- A water meter where 200 litres in 5 minutes is implausible → `threshold: 200`
+
+**Example — solar inverter, safe automation:**
+
+```yaml
+action: statistics_outlier_cleaner.clean_outliers
+data:
+  statistic_id: sensor.solar_inverter_energy
+  method: absolute
+  threshold: 15      # inverter is rated 8 kW; 15 kWh/h is impossible
+  lookback_days: 90
+  replacement: 0
+```
+
+Any hour showing more than 15 kWh of generation is flagged. Normal peaks (say 7 kWh on a sunny afternoon) are never touched.
+
+---
+
+### `top_n` — Largest N changes
+
+**How it works:** Sorts all rows by `|change|` descending and returns the top N — regardless of whether they are actually unusual.
+
+**Why this is dangerous in automations:** On a clean dataset with no real spikes, `top_n` will still return N rows and flag them for fixing. This is identical to the behaviour of the built-in Developer Tools → Statistics dialog. It is useful for manual inspection ("show me the 10 biggest changes so I can decide") but should never run unattended.
+
+**The `clean_outliers` service intentionally rejects `top_n`** to prevent accidental data loss. Use it only via the sidebar panel where you can review results before applying.
+
+**Example — manual inspection in the panel:**
+
+1. Open the panel, select your sensor, set method to **Top N**, enter `10`.
+2. Click **Scan**. The 10 largest changes are shown.
+3. Review each row. Deselect any that look legitimate.
+4. Set a replacement value and click **Apply Fix to Selected**.
+
+**Example — what can go wrong with automation:**
+
+Suppose your electricity sensor has these hourly changes over the past week:
+
+```
+1.2, 0.9, 1.4, 1.1, 0.8, 1.3, 1.0  ← all normal, no spikes
+```
+
+Running `top_n: 3` would flag `1.4`, `1.3`, `1.2` and overwrite them with `0`. Your historical data would be permanently damaged with no spike ever having existed. `mad` and `absolute` would return zero results on this dataset.
 
 ---
 
