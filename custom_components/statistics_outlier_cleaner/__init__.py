@@ -12,9 +12,9 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.components.recorder import get_instance
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     ATTR_DRY_RUN,
@@ -48,24 +48,16 @@ from .websocket import async_register_commands
 
 _LOGGER = logging.getLogger(__name__)
 
+# Accept `statistics_outlier_cleaner:` in configuration.yaml with no options.
+CONFIG_SCHEMA = vol.Schema({DOMAIN: vol.Schema({})}, extra=vol.ALLOW_EXTRA)
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Statistics Outlier Cleaner from a config entry."""
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up Statistics Outlier Cleaner."""
     _check_sqlite_dialect(hass)
     async_register_commands(hass)
     _register_panel(hass)
     _register_services(hass)
-    return True
-
-
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
-    hass.services.async_remove(DOMAIN, SERVICE_CLEAN_OUTLIERS)
-    hass.services.async_remove(DOMAIN, SERVICE_RESTORE_FIX)
-    try:
-        hass.http.unregister_static_path(PANEL_STATIC_PATH)
-    except Exception:  # noqa: BLE001
-        pass
     return True
 
 

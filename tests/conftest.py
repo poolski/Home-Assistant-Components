@@ -19,6 +19,8 @@ _HA_STUBS = [
     "homeassistant.components.frontend",
     "homeassistant.config_entries",
     "homeassistant.exceptions",
+    "homeassistant.helpers",
+    "homeassistant.helpers.typing",
     "homeassistant.util",
     "homeassistant.util.dt",
     "voluptuous",

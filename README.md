@@ -21,23 +21,31 @@ Unlike the built-in Developer Tools > Statistics dialog, this integration:
 
 ### Via HACS (recommended)
 
-1. Open HACS in your Home Assistant sidebar.
-2. Go to **Integrations** → click the three-dot menu → **Custom repositories**.
-3. Add this repository URL and select category **Integration**.
-4. Search for **Statistics Outlier Cleaner** and click **Download**.
-5. Restart Home Assistant.
-6. Go to **Settings → Devices & Services → Add Integration** and search for **Statistics Outlier Cleaner**.
+1. Click the button above, or open HACS → **Integrations** → three-dot menu → **Custom repositories**, add this repo URL with category **Integration**.
+2. Search for **Statistics Outlier Cleaner** and click **Download**.
+3. Add one line to your `configuration.yaml`:
+
+   ```yaml
+   statistics_outlier_cleaner:
+   ```
+
+4. Restart Home Assistant. The **Outlier Cleaner** entry will appear in the sidebar.
 
 ### Manual
 
-1. Copy the `custom_components/statistics_outlier_cleaner` directory into your HA config folder so the path is:
+1. Copy the `custom_components/statistics_outlier_cleaner` directory into your HA config folder:
 
    ```text
    <config>/custom_components/statistics_outlier_cleaner/
    ```
 
-2. Restart Home Assistant.
-3. Go to **Settings → Devices & Services → Add Integration** and search for **Statistics Outlier Cleaner**.
+2. Add one line to `configuration.yaml`:
+
+   ```yaml
+   statistics_outlier_cleaner:
+   ```
+
+3. Restart Home Assistant.
 
 ---
 
