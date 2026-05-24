@@ -138,23 +138,23 @@ def test_panel_class_name(panel_js):
     assert "StatisticsOutlierCleanerPanel" in panel_js
 
 
-def test_panel_uses_ha_statistic_picker(panel_js):
-    assert "ha-statistic-picker" in panel_js
-    # statisticTypes must be set as a JS property (array), not an HTML attribute
-    assert "statisticTypes" in panel_js
+def test_panel_uses_statistic_autocomplete(panel_js):
+    # Native autocomplete driven by list_sum_statistics WS command
+    assert "list_sum_statistics" in panel_js
+    assert "stat-input" in panel_js
+    assert "stat-dropdown" in panel_js
 
 
-def test_panel_uses_ha_date_range_picker(panel_js):
-    assert "ha-date-range-picker" in panel_js
+def test_panel_uses_date_inputs(panel_js):
+    assert 'type="date"' in panel_js
+    assert "date-start" in panel_js
+    assert "date-end" in panel_js
 
 
 def test_panel_references_ws_commands(panel_js):
     for cmd in ("fetch_outliers", "apply_fix", "list_fixes", "restore_fix"):
         assert cmd in panel_js, f"panel JS missing WS command reference '{cmd}'"
 
-
-def test_panel_sets_hass_on_child_components(panel_js):
-    assert "el.hass = hass" in panel_js
 
 
 # ---------------------------------------------------------------------------

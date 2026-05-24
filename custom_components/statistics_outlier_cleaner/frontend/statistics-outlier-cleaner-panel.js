@@ -2,17 +2,15 @@
  * Statistics Outlier Cleaner — sidebar panel
  *
  * Vanilla web component, no build step required.
- * Uses HA built-in components: ha-statistic-picker, ha-date-range-picker.
- *
- * UX mirrors the dev tools Statistics dialog where possible:
- *   - ha-statistic-picker with has-sum filter
- *   - ha-date-range-picker for the time window
- *   - Per-row checkboxes for multi-select
- *   - change as the primary column (matching dev tools table)
+ * Uses native HTML controls for statistic selection and date range —
+ * ha-statistic-picker and ha-date-range-picker are lazy-loaded by HA only
+ * when the Statistics dev-tools view is opened, so they are never available
+ * in a custom panel context.
  */
 
 const DOMAIN = "statistics_outlier_cleaner";
 const WS = {
+  list_sum_statistics: `${DOMAIN}/list_sum_statistics`,
   fetch_outliers: `${DOMAIN}/fetch_outliers`,
   apply_fix: `${DOMAIN}/apply_fix`,
   list_fixes: `${DOMAIN}/list_fixes`,
@@ -44,8 +42,14 @@ const STYLES = `
     margin-bottom: 12px;
   }
   .form-group { display: flex; flex-direction: column; gap: 4px; }
-  .form-group label { font-size: 0.75rem; font-weight: 500; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.05em; }
-  select, input[type=number] {
+  .form-group label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--secondary-text-color);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  select, input[type=text], input[type=date], input[type=number] {
     padding: 8px 10px;
     border: 1px solid var(--divider-color, #e0e0e0);
     border-radius: 4px;
@@ -57,8 +61,52 @@ const STYLES = `
   }
   select { min-width: 160px; }
   input[type=number] { width: 100px; }
-  ha-statistic-picker { display: block; min-width: 280px; }
-  ha-date-range-picker { display: block; }
+  input[type=date] { width: 160px; }
+  .stat-autocomplete {
+    position: relative;
+    flex: 1;
+    min-width: 280px;
+  }
+  .stat-autocomplete input[type=text] {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .stat-autocomplete input[type=text].loading {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='none' stroke='%23ccc' stroke-width='3'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+  }
+  .stat-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--card-background-color, #fff);
+    border: 1px solid var(--divider-color, #e0e0e0);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: 0 4px 8px rgba(0,0,0,.1);
+  }
+  .stat-dropdown.hidden { display: none; }
+  .stat-option {
+    padding: 8px 10px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .stat-option:hover, .stat-option.active {
+    background: rgba(var(--rgb-primary-color, 3,169,244), 0.1);
+  }
+  .stat-option.no-results {
+    color: var(--secondary-text-color);
+    cursor: default;
+    font-style: italic;
+  }
   button {
     padding: 0 16px;
     height: 36px;
@@ -86,7 +134,6 @@ const STYLES = `
     font-size: 0.8rem;
   }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .method-extras { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
   .hidden { display: none !important; }
   table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--divider-color, #e0e0e0); }
@@ -120,10 +167,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._hass = null;
     this._candidates = [];
-    this._selected = new Set();   // indices of checked rows
+    this._selected = new Set();
     this._msgId = 1;
     this._startDate = null;
     this._endDate = null;
+    this._statId = null;
+    this._allStats = [];      // full list from WS
+    this._activeIdx = -1;     // keyboard nav index in dropdown
   }
 
   set hass(hass) {
@@ -131,47 +181,21 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._hass = hass;
     if (firstSet) {
       this._render();
-      this._initHaComponents();
+      this._loadStatistics();
       this._loadHistory();
-    }
-    // Forward hass to HA child components
-    for (const el of this.shadowRoot.querySelectorAll("ha-statistic-picker, ha-date-range-picker")) {
-      el.hass = hass;
     }
   }
 
-  // Wait for HA lazy-loaded elements to upgrade, then set JS properties.
-  _initHaComponents() {
-    const picker = this._q("stat-picker");
-    const datePicker = this._q("date-picker");
+  // ---------------------------------------------------------------------------
+  // Load statistics list for autocomplete
+  // ---------------------------------------------------------------------------
 
-    const init = () => {
-      // statisticTypes must be an array property, not a string attribute
-      picker.statisticTypes = ["sum"];
-      picker.hass = this._hass;
-
-      // ha-date-range-picker needs Date objects, not strings
-      const end = new Date();
-      const start = new Date(end.getTime() - 30 * 86_400_000);
-      this._startDate = start;
-      this._endDate = end;
-      datePicker.startDate = start;
-      datePicker.endDate = end;
-      datePicker.hass = this._hass;
-    };
-
-    // If elements are already upgraded (common after first panel load), init immediately.
-    // Otherwise wait for the custom element registry — HA loads these lazily.
-    const pickerDefined = customElements.get("ha-statistic-picker");
-    const datePickerDefined = customElements.get("ha-date-range-picker");
-
-    if (pickerDefined && datePickerDefined) {
-      init();
-    } else {
-      Promise.all([
-        pickerDefined ? Promise.resolve() : customElements.whenDefined("ha-statistic-picker"),
-        datePickerDefined ? Promise.resolve() : customElements.whenDefined("ha-date-range-picker"),
-      ]).then(init);
+  async _loadStatistics() {
+    try {
+      const result = await this._send({ type: WS.list_sum_statistics });
+      this._allStats = (result.statistics || []).sort();
+    } catch (e) {
+      this._allStats = [];
     }
   }
 
@@ -179,27 +203,37 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   // Rendering
   // ---------------------------------------------------------------------------
 
+  _defaultDateStr(offsetDays) {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    return d.toISOString().slice(0, 10);
+  }
+
   _render() {
     this.shadowRoot.innerHTML = `
       <style>${STYLES}</style>
 
       <h2>Statistics Outlier Cleaner</h2>
 
-      <!-- Scan controls -->
       <div class="card">
         <h3>Scan</h3>
 
         <div class="form-row">
-          <div class="form-group" style="flex:1;min-width:280px">
+          <div class="form-group stat-autocomplete" id="stat-wrap">
             <label>Statistic</label>
-            <ha-statistic-picker id="stat-picker"></ha-statistic-picker>
+            <input type="text" id="stat-input" placeholder="Type to search statistics…" autocomplete="off">
+            <div class="stat-dropdown hidden" id="stat-dropdown"></div>
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label>Date range</label>
-            <ha-date-range-picker id="date-picker"></ha-date-range-picker>
+            <label>From</label>
+            <input type="date" id="date-start" value="${this._defaultDateStr(-30)}">
+          </div>
+          <div class="form-group">
+            <label>To</label>
+            <input type="date" id="date-end" value="${this._defaultDateStr(0)}">
           </div>
         </div>
 
@@ -233,7 +267,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
       <div id="scan-status"></div>
 
-      <!-- Results -->
       <div id="results-card" class="card hidden">
         <h3>Detected Outliers</h3>
         <div id="scan-meta" class="meta"></div>
@@ -261,7 +294,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         </div>
       </div>
 
-      <!-- Fix history -->
       <div class="card">
         <h3>Fix History</h3>
         <button class="secondary" id="btn-refresh-history" style="margin-bottom:12px">Refresh</button>
@@ -269,7 +301,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       </div>
     `;
 
-    // Wire events
+    this._wireEvents();
+  }
+
+  _wireEvents() {
     this._q("method").addEventListener("change", () => this._updateMethodOptions());
     this._q("btn-scan").addEventListener("click", () => this._scan());
     this._q("btn-apply").addEventListener("click", () => this._applyFix());
@@ -277,18 +312,14 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._q("btn-select-none").addEventListener("click", () => this._selectAll(false));
     this._q("btn-refresh-history").addEventListener("click", () => this._loadHistory());
 
-    // ha-statistic-picker fires "value-changed"
-    this._q("stat-picker").addEventListener("value-changed", (e) => {
-      this._statId = e.detail.value;
+    const input = this._q("stat-input");
+    input.addEventListener("input", () => this._onStatInput());
+    input.addEventListener("keydown", (e) => this._onStatKeydown(e));
+    input.addEventListener("focus", () => this._showDropdown(input.value));
+    // Close dropdown when clicking outside
+    document.addEventListener("click", (e) => {
+      if (!this.shadowRoot.contains(e.target)) this._closeDropdown();
     });
-
-    // ha-date-range-picker fires "value-changed"; shape varies by HA version
-    this._q("date-picker").addEventListener("value-changed", (e) => {
-      const d = e.detail.value ?? e.detail;
-      this._startDate = d?.startDate ?? null;
-      this._endDate   = d?.endDate   ?? null;
-    });
-
   }
 
   _q(id) { return this.shadowRoot.getElementById(id); }
@@ -298,6 +329,76 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._q("opt-mad").classList.toggle("hidden", m !== "mad");
     this._q("opt-absolute").classList.toggle("hidden", m !== "absolute");
     this._q("opt-top-n").classList.toggle("hidden", m !== "top_n");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Statistic autocomplete
+  // ---------------------------------------------------------------------------
+
+  _onStatInput() {
+    this._statId = null;   // clear confirmed selection while typing
+    this._showDropdown(this._q("stat-input").value);
+  }
+
+  _showDropdown(filter) {
+    const dd = this._q("stat-dropdown");
+    const term = filter.trim().toLowerCase();
+    const matches = term
+      ? this._allStats.filter((s) => s.toLowerCase().includes(term))
+      : this._allStats;
+
+    if (!matches.length) {
+      dd.innerHTML = `<div class="stat-option no-results">${
+        this._allStats.length ? "No matches" : "Loading statistics…"
+      }</div>`;
+    } else {
+      dd.innerHTML = matches.slice(0, 50).map((s) =>
+        `<div class="stat-option" data-value="${s}">${s}</div>`
+      ).join("");
+      dd.querySelectorAll(".stat-option[data-value]").forEach((el) => {
+        el.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          this._selectStat(el.dataset.value);
+        });
+      });
+    }
+
+    this._activeIdx = -1;
+    dd.classList.remove("hidden");
+  }
+
+  _onStatKeydown(e) {
+    const dd = this._q("stat-dropdown");
+    const options = [...dd.querySelectorAll(".stat-option[data-value]")];
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      this._activeIdx = Math.min(this._activeIdx + 1, options.length - 1);
+      this._highlightOption(options);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      this._activeIdx = Math.max(this._activeIdx - 1, 0);
+      this._highlightOption(options);
+    } else if (e.key === "Enter" && this._activeIdx >= 0) {
+      e.preventDefault();
+      this._selectStat(options[this._activeIdx].dataset.value);
+    } else if (e.key === "Escape") {
+      this._closeDropdown();
+    }
+  }
+
+  _highlightOption(options) {
+    options.forEach((el, i) => el.classList.toggle("active", i === this._activeIdx));
+    options[this._activeIdx]?.scrollIntoView({ block: "nearest" });
+  }
+
+  _selectStat(value) {
+    this._statId = value;
+    this._q("stat-input").value = value;
+    this._closeDropdown();
+  }
+
+  _closeDropdown() {
+    this._q("stat-dropdown")?.classList.add("hidden");
   }
 
   // ---------------------------------------------------------------------------
@@ -313,10 +414,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   // ---------------------------------------------------------------------------
 
   async _scan() {
-    const statId = this._statId || this._q("stat-picker").value;
+    const statId = this._statId || this._q("stat-input").value.trim();
     if (!statId) { this._showStatus("error", "Select a statistic first."); return; }
 
     const method = this._q("method").value;
+    const startVal = this._q("date-start").value;
+    const endVal   = this._q("date-end").value;
+
     const params = {
       type: WS.fetch_outliers,
       statistic_id: statId,
@@ -324,11 +428,9 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       method,
     };
 
-    if (this._startDate && this._endDate) {
-      // Convert date range to lookback_days (rounded up from endDate)
-      const nowMs = Date.now();
-      const startMs = this._startDate instanceof Date ? this._startDate.getTime() : +this._startDate;
-      params.lookback_days = Math.ceil((nowMs - startMs) / 86_400_000);
+    if (startVal) {
+      const startMs = new Date(startVal).getTime();
+      params.lookback_days = Math.ceil((Date.now() - startMs) / 86_400_000);
     }
 
     if (method === "mad")      params.mad_factor = parseFloat(this._q("mad-factor").value) || 6;
@@ -341,7 +443,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     try {
       const result = await this._send(params);
       this._candidates = result.candidates || [];
-      this._selected = new Set(this._candidates.map((_, i) => i));  // select all by default
+      this._selected = new Set(this._candidates.map((_, i) => i));
       this._renderResults(result);
       this._clearStatus();
     } catch (e) {
@@ -357,8 +459,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const card = this._q("results-card");
     card.classList.remove("hidden");
 
-    const meta = this._q("scan-meta");
-    meta.textContent =
+    this._q("scan-meta").textContent =
       `Scanned ${report.scanned_rows} rows · Method: ${report.method}` +
       (report.median != null ? ` · Median: ${report.median.toFixed(4)}` : "") +
       (report.mad    != null ? ` · MAD: ${report.mad.toFixed(4)}`       : "");
@@ -391,28 +492,22 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       <table>
         <thead>
           <tr>
-            <th style="width:32px"><input type="checkbox" id="check-all" ${this._selected.size === this._candidates.length ? "checked" : ""}></th>
-            <th>Start</th>
-            <th>Period</th>
-            <th>Change</th>
-            <th>State</th>
+            <th style="width:32px"><input type="checkbox" id="check-all" ${
+              this._selected.size === this._candidates.length ? "checked" : ""
+            }></th>
+            <th>Start</th><th>Period</th><th>Change</th><th>State</th>
           </tr>
         </thead>
         <tbody>${tbody}</tbody>
       </table>`;
 
-    // Header checkbox
-    this._q("check-all").addEventListener("change", (e) => {
-      this._selectAll(e.target.checked);
-    });
-
-    // Row checkboxes
+    this._q("check-all").addEventListener("change", (e) => this._selectAll(e.target.checked));
     this._q("results-table").querySelectorAll(".row-check").forEach((cb) => {
       cb.addEventListener("change", (e) => {
         const idx = parseInt(e.target.dataset.idx);
         e.target.checked ? this._selected.add(idx) : this._selected.delete(idx);
-        const row = this._q("results-table").querySelector(`tr[data-idx="${idx}"]`);
-        row?.classList.toggle("selected", e.target.checked);
+        this._q("results-table").querySelector(`tr[data-idx="${idx}"]`)
+          ?.classList.toggle("selected", e.target.checked);
         this._updateSelectionCount();
         this._updateCheckAll();
       });
@@ -422,17 +517,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   }
 
   _selectAll(on) {
-    if (on) {
-      this._candidates.forEach((_, i) => this._selected.add(i));
-    } else {
-      this._selected.clear();
-    }
+    if (on) this._candidates.forEach((_, i) => this._selected.add(i));
+    else this._selected.clear();
     this._renderTable();
   }
 
   _updateSelectionCount() {
-    const n = this._selected.size;
-    const total = this._candidates.length;
+    const n = this._selected.size, total = this._candidates.length;
     this._q("selection-count").textContent = n ? `${n} of ${total} selected` : "";
     this._q("btn-apply").disabled = n === 0;
   }
@@ -451,7 +542,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   async _applyFix() {
     if (!this._selected.size) return;
 
-    const statId = this._statId || this._q("stat-picker").value;
+    const statId = this._statId || this._q("stat-input").value.trim();
     const replacement = parseFloat(this._q("replacement").value) || 0;
     const dryRun = this._q("dry-run").checked;
 
@@ -476,13 +567,11 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       const msg = dryRun
         ? `Dry run: would fix ${result.planned} row(s).`
         : `Fixed ${result.applied} row(s). Fix ID: <span class="fix-id-chip">${result.fix_id}</span>`;
-
       this._showStatus(hasErrors ? "error" : "success", msg);
 
       if (!dryRun) {
-        // Remove fixed rows from results and re-render
-        const removedIndices = new Set(this._selected);
-        this._candidates = this._candidates.filter((_, i) => !removedIndices.has(i));
+        const removed = new Set(this._selected);
+        this._candidates = this._candidates.filter((_, i) => !removed.has(i));
         this._selected = new Set(this._candidates.map((_, i) => i));
         if (this._candidates.length) {
           this._renderTable();
