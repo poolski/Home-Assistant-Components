@@ -193,7 +193,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   async _loadStatistics() {
     try {
       const result = await this._send({ type: WS.list_sum_statistics });
-      this._allStats = (result.statistics || []).sort();
+      this._allStats = (result.statistics || [])
+        .map((s) => (typeof s === "string" ? s : s.statistic_id))
+        .filter(Boolean)
+        .sort();
     } catch (e) {
       this._allStats = [];
     }
