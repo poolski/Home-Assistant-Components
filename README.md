@@ -28,9 +28,11 @@ Unlike the built-in Developer Tools > Statistics dialog, this integration:
 ### Manual
 
 1. Copy the `custom_components/statistics_outlier_cleaner` directory into your HA config folder so the path is:
-   ```
+
+   ```text
    <config>/custom_components/statistics_outlier_cleaner/
    ```
+
 2. Restart Home Assistant.
 3. Go to **Settings → Devices & Services → Add Integration** and search for **Statistics Outlier Cleaner**.
 
@@ -79,8 +81,8 @@ The fix ID is logged at INFO level after every `clean_outliers` call.
 
 ## Detection methods
 
-| Method | When to use | Safe for automation? |
-|--------|-------------|----------------------|
+| Method   | When to use | Safe for automation? |
+| -------- | ----------- | -------------------- |
 | `mad` | General-purpose. Flags rows whose [modified z-score](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm) ≥ `mad_factor`. Conservative: returns nothing when the sensor is flat. | ✅ Yes |
 | `absolute` | You know the maximum plausible change (e.g. 100 kWh/h). Flags `\|change\| ≥ threshold`. | ✅ Yes |
 | `top_n` | Matches the built-in dev tools behaviour. Always returns the N largest changes — will flag normal data if there are no real spikes. | ⚠️ Manual use only |
