@@ -9,6 +9,40 @@
  */
 
 const DOMAIN = "statistics_outlier_cleaner";
+
+const METHOD_HELP = {
+  mad: {
+    title: "MAD — Median Absolute Deviation",
+    safe: true,
+    body: `Flags rows whose change deviates unusually far from the median of the dataset.
+      Safe for automations: if the data is flat or has no real spikes, nothing is flagged.`,
+    params: `<strong>MAD factor</strong> — how many deviations above the median counts as an outlier.
+      Higher = more conservative. <em>6 catches clear spikes; 3 is aggressive; 10 is very strict.</em>`,
+    example: `A meter that normally accumulates 1–2 kWh/h would need a change of ~500 kWh to be flagged
+      at factor 6. A slightly noisy hour at 2.5 kWh would not be touched.`,
+  },
+  absolute: {
+    title: "Absolute threshold",
+    safe: true,
+    body: `Flags any row where |change| ≥ threshold. Simple and predictable — set the threshold
+      just above the physical maximum your sensor can legitimately produce in one period.`,
+    params: `<strong>Threshold</strong> — minimum |change| to flag.
+      <em>Examples: solar inverter rated 8 kW → threshold 10; gas meter max 3 m³/h → threshold 3.</em>`,
+    example: `sensor.solar_energy, threshold 15: any hour showing more than 15 kWh is flagged.
+      Normal peaks (7 kWh on a sunny afternoon) are never touched.`,
+  },
+  top_n: {
+    title: "Top N (manual use only)",
+    safe: false,
+    body: `Always returns the N largest changes — even on perfectly clean data with no real spikes.
+      This matches the built-in Developer Tools → Statistics dialog.`,
+    params: `<strong>N</strong> — how many rows to return. <em>10 is a good starting point for manual review.</em>`,
+    example: `⚠️ If your sensor has no spikes, Top N will still flag the N largest normal readings
+      and overwrite them if you apply the fix. Always review results before applying.
+      This method is intentionally blocked in the clean_outliers service.`,
+  },
+};
+
 const WS = {
   list_sum_statistics: `${DOMAIN}/list_sum_statistics`,
   fetch_outliers: `${DOMAIN}/fetch_outliers`,
@@ -159,6 +193,42 @@ const STYLES = `
     padding: 2px 6px;
     border-radius: 3px;
   }
+  .method-help {
+    margin-top: 10px;
+    padding: 10px 14px;
+    border-left: 3px solid var(--primary-color, #03a9f4);
+    background: var(--secondary-background-color, #f5f5f5);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  .method-help.warn {
+    border-left-color: var(--warning-color, #f59e0b);
+    background: #fffbeb;
+  }
+  .method-help h4 { margin: 0 0 6px; font-size: 0.875rem; font-weight: 600; }
+  .method-help p { margin: 4px 0; }
+  .method-help .help-label {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--secondary-text-color);
+    margin-top: 6px;
+    margin-bottom: 2px;
+  }
+  .safe-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 6px;
+    font-weight: 600;
+    vertical-align: middle;
+  }
+  .safe-badge.yes { background: #dcfce7; color: #166534; }
+  .safe-badge.no  { background: #fee2e2; color: #991b1b; }
 `;
 
 class StatisticsOutlierCleanerPanel extends HTMLElement {
@@ -263,6 +333,8 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
           </div>
         </div>
 
+        <div id="method-help"></div>
+
         <div class="form-row">
           <button class="primary" id="btn-scan">Scan</button>
         </div>
@@ -309,6 +381,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
   _wireEvents() {
     this._q("method").addEventListener("change", () => this._updateMethodOptions());
+    this._updateMethodOptions(); // render initial help box
     this._q("btn-scan").addEventListener("click", () => this._scan());
     this._q("btn-apply").addEventListener("click", () => this._applyFix());
     this._q("btn-select-all").addEventListener("click", () => this._selectAll(true));
@@ -332,6 +405,24 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._q("opt-mad").classList.toggle("hidden", m !== "mad");
     this._q("opt-absolute").classList.toggle("hidden", m !== "absolute");
     this._q("opt-top-n").classList.toggle("hidden", m !== "top_n");
+    this._renderMethodHelp(m);
+  }
+
+  _renderMethodHelp(method) {
+    const h = METHOD_HELP[method];
+    if (!h) return;
+    const safeBadge = h.safe
+      ? `<span class="safe-badge yes">✓ Safe for automation</span>`
+      : `<span class="safe-badge no">⚠ Manual use only</span>`;
+    this._q("method-help").innerHTML = `
+      <div class="method-help ${h.safe ? "" : "warn"}">
+        <h4>${h.title}${safeBadge}</h4>
+        <p>${h.body}</p>
+        <span class="help-label">Parameter</span>
+        <p>${h.params}</p>
+        <span class="help-label">Example</span>
+        <p>${h.example}</p>
+      </div>`;
   }
 
   // ---------------------------------------------------------------------------
