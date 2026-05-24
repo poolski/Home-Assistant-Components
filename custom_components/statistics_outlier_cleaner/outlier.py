@@ -202,7 +202,12 @@ def _algo_mad(
     if not candidates:
         return [], 0.0, 0.0
 
-    values = [c.change for c in candidates]
+    # Compute MAD on non-zero changes only.  Sensors that reset daily (e.g.
+    # pv_energy_today_kwh) have many zero-change rows at night; including them
+    # drives the median to 0 and collapses MAD to 0, hiding real spikes.
+    nonzero = [c for c in candidates if c.change != 0]
+    stat_candidates = nonzero if nonzero else candidates
+    values = [c.change for c in stat_candidates]
     values_sorted = sorted(values)
     median = _median_sorted(values_sorted)
     deviations = sorted(abs(v - median) for v in values)

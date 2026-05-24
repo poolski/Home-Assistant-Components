@@ -285,6 +285,27 @@ class TestAlgoMad:
         conservative, _, _ = _algo_mad(candidates, mad_factor=10.0)
         assert len(aggressive) >= len(conservative)
 
+    def test_daily_reset_sensor_with_spike(self):
+        # pv_energy_today_kwh pattern: most hours are 0 (night), a few are
+        # small positive (daytime generation), one hour has a huge spike.
+        # With all zeros dominating, median=0 and naive MAD=0 → the algorithm
+        # must NOT silently return [] on this data; it must detect the spike.
+        t = 0
+        candidates = []
+        # 16 nighttime zero-change hours
+        for _ in range(16):
+            candidates.append(_hour(t, 0.0)); t += 3_600_000
+        # 7 normal daytime hours (0.5–1.5 kWh each)
+        for c in [0.5, 1.0, 1.5, 1.2, 0.8, 0.6, 0.4]:
+            candidates.append(_hour(t, c)); t += 3_600_000
+        # 1 spike hour
+        candidates.append(_hour(t, 500.0))
+
+        flagged, median, mad = _algo_mad(candidates, mad_factor=3.0)
+        assert len(flagged) == 1
+        assert flagged[0].change == 500.0
+        assert mad > 0.0  # MAD computed on non-zero changes only
+
 
 # ---------------------------------------------------------------------------
 # _hybrid_rows
