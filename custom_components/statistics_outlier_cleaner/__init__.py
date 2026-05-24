@@ -67,13 +67,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def _register_panel(hass: HomeAssistant) -> None:
+    from homeassistant.components.frontend import async_register_built_in_panel  # noqa: PLC0415
     from homeassistant.components.http import StaticPathConfig  # noqa: PLC0415
 
     frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
     await hass.http.async_register_static_paths(
         [StaticPathConfig(PANEL_STATIC_PATH, frontend_dir, cache_headers=False)]
     )
-    hass.components.frontend.async_register_built_in_panel(
+    async_register_built_in_panel(
+        hass,
         component_name="custom",
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
