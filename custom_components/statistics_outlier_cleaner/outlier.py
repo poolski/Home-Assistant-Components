@@ -18,6 +18,7 @@ Key facts mirrored from the upstream implementation:
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import logging
@@ -189,6 +190,8 @@ def _algo_absolute(
 
 
 _DAY_MS = 24 * 3_600_000
+_HOUR_MS = 3_600_000
+_5MIN_MS = 300_000
 
 # Per-period clock-jitter tolerance for time-of-day peer matching.
 _TOD_TOLERANCE_MS: dict[str, int] = {
@@ -210,19 +213,44 @@ def _algo_mad(
     Candidates with fewer than 2 non-zero peers at their time of day are
     skipped — conservative behaviour when there is not enough history.
 
+    Complexity: O(N × D) where D = distinct time-of-day buckets (≤24 for hourly,
+    ≤288 for 5-minute). For 8 000 rows × 24 buckets ≈ 192 000 ops vs 64 M for O(N²).
+
     Returns ``(flagged, None, None)`` — no single global baseline exists.
     """
     if not candidates:
         return [], None, None
 
+    # Pre-group by exact time-of-day ms for O(log D) range lookup per candidate.
+    tod_groups: dict[int, list[OutlierCandidate]] = {}
+    for c in candidates:
+        key = c.start % _DAY_MS
+        tod_groups.setdefault(key, []).append(c)
+    tod_keys = sorted(tod_groups)
+
     flagged: list[OutlierCandidate] = []
     for c in candidates:
-        tolerance = _TOD_TOLERANCE_MS.get(c.period, 300_000)
+        tolerance = _TOD_TOLERANCE_MS.get(c.period, _HOUR_MS)
         tod = c.start % _DAY_MS
-        peers = [
-            other for other in candidates
-            if abs((other.start % _DAY_MS) - tod) <= tolerance
-        ]
+        lo_tod = tod - tolerance
+        hi_tod = tod + tolerance
+
+        peers: list[OutlierCandidate] = []
+        lo = bisect_left(tod_keys, lo_tod)
+        hi = bisect_right(tod_keys, hi_tod)
+        for key in tod_keys[lo:hi]:
+            peers.extend(tod_groups[key])
+
+        # Handle midnight wrap-around (tolerance window crosses 00:00).
+        if lo_tod < 0:
+            wrap_lo = bisect_left(tod_keys, lo_tod + _DAY_MS)
+            for key in tod_keys[wrap_lo:]:
+                peers.extend(tod_groups[key])
+        elif hi_tod >= _DAY_MS:
+            wrap_hi = bisect_right(tod_keys, hi_tod - _DAY_MS)
+            for key in tod_keys[:wrap_hi]:
+                peers.extend(tod_groups[key])
+
         nonzero_peers = [p for p in peers if p.change != 0]
         stat_peers = nonzero_peers if nonzero_peers else peers
         if len(stat_peers) < 2:
