@@ -14,32 +14,39 @@ const METHOD_HELP = {
   mad: {
     title: "MAD — Median Absolute Deviation",
     safe: true,
-    body: `Flags rows whose change deviates unusually far from the median of the dataset.
-      Safe for automations: if the data is flat or has no real spikes, nothing is flagged.`,
+    body: `Flags rows whose <code>change</code> deviates unusually far from the median of peers
+      at the same time of day. Safe for automations: if the data is flat or has no real spikes,
+      nothing is flagged.`,
     params: `<strong>MAD factor</strong> — how many deviations above the median counts as an outlier.
-      Higher = more conservative. <em>6 catches clear spikes; 3 is aggressive; 10 is very strict.</em>`,
-    example: `A meter that normally accumulates 1–2 kWh/h would need a change of ~500 kWh to be flagged
-      at factor 6. A slightly noisy hour at 2.5 kWh would not be touched.`,
+      Higher = more conservative.
+      <em><code>6</code> catches clear spikes; <code>3</code> is aggressive; <code>10</code> is very strict.</em>`,
+    example: `A meter that normally accumulates <code>1–2 kWh/h</code> would need a change of
+      <code>~500 kWh</code> to be flagged at <code>factor 6</code>.
+      A slightly noisy hour at <code>2.5 kWh</code> would not be touched.`,
   },
   absolute: {
     title: "Absolute threshold",
     safe: true,
-    body: `Flags any row where |change| ≥ threshold. Simple and predictable — set the threshold
-      just above the physical maximum your sensor can legitimately produce in one period.`,
-    params: `<strong>Threshold</strong> — minimum |change| to flag.
-      <em>Examples: solar inverter rated 8 kW → threshold 10; gas meter max 3 m³/h → threshold 3.</em>`,
-    example: `sensor.solar_energy, threshold 15: any hour showing more than 15 kWh is flagged.
-      Normal peaks (7 kWh on a sunny afternoon) are never touched.`,
+    body: `Flags any row where <code>|change| ≥ threshold</code>. Simple and predictable — set the
+      <code>threshold</code> just above the physical maximum your sensor can legitimately produce
+      in one period.`,
+    params: `<strong>Threshold</strong> — minimum <code>|change|</code> to flag.
+      <em>Examples: solar inverter rated <code>8 kW</code> → threshold <code>10</code>;
+      gas meter max <code>3 m³/h</code> → threshold <code>3</code>.</em>`,
+    example: `<code>sensor.solar_energy</code>, <code>threshold 15</code>: any hour showing more than
+      <code>15 kWh</code> is flagged. Normal peaks (<code>7 kWh</code> on a sunny afternoon)
+      are never touched.`,
   },
   top_n: {
     title: "Top N (manual use only)",
     safe: false,
-    body: `Always returns the N largest changes — even on perfectly clean data with no real spikes.
-      This matches the built-in Developer Tools → Statistics dialog.`,
-    params: `<strong>N</strong> — how many rows to return. <em>10 is a good starting point for manual review.</em>`,
-    example: `⚠️ If your sensor has no spikes, Top N will still flag the N largest normal readings
-      and overwrite them if you apply the fix. Always review results before applying.
-      This method is intentionally blocked in the clean_outliers service.`,
+    body: `Always returns the <code>N</code> largest changes — even on perfectly clean data with no
+      real spikes. This matches the built-in Developer Tools → Statistics dialog.`,
+    params: `<strong>N</strong> — how many rows to return.
+      <em><code>10</code> is a good starting point for manual review.</em>`,
+    example: `⚠️ If your sensor has no spikes, <code>Top N</code> will still flag the <code>N</code>
+      largest normal readings and overwrite them if you apply the fix. Always review results before
+      applying. This method is intentionally blocked in the <code>clean_outliers</code> service.`,
   },
 };
 
@@ -229,6 +236,7 @@ const STYLES = `
   }
   .safe-badge.yes { background: #dcfce7; color: #166534; }
   .safe-badge.no  { background: #fee2e2; color: #991b1b; }
+  code { font-family: monospace; background: var(--secondary-background-color, #f5f5f5); padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
 `;
 
 class StatisticsOutlierCleanerPanel extends HTMLElement {
@@ -264,9 +272,12 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     try {
       const result = await this._send({ type: WS.list_sum_statistics });
       this._allStats = (result.statistics || [])
-        .map((s) => (typeof s === "string" ? s : s.statistic_id))
-        .filter(Boolean)
-        .sort();
+        .filter((s) => s && s.statistic_id)
+        .sort((a, b) => {
+          const aLabel = (a.name || a.statistic_id).toLowerCase();
+          const bLabel = (b.name || b.statistic_id).toLowerCase();
+          return aLabel.localeCompare(bLabel);
+        });
     } catch (e) {
       this._allStats = [];
     }
@@ -438,7 +449,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const dd = this._q("stat-dropdown");
     const term = filter.trim().toLowerCase();
     const matches = term
-      ? this._allStats.filter((s) => s.toLowerCase().includes(term))
+      ? this._allStats.filter((s) =>
+          s.statistic_id.toLowerCase().includes(term) ||
+          (s.name || "").toLowerCase().includes(term)
+        )
       : this._allStats;
 
     if (!matches.length) {
@@ -446,9 +460,12 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         this._allStats.length ? "No matches" : "Loading statistics…"
       }</div>`;
     } else {
-      dd.innerHTML = matches.slice(0, 50).map((s) =>
-        `<div class="stat-option" data-value="${s}">${s}</div>`
-      ).join("");
+      dd.innerHTML = matches.slice(0, 50).map((s) => {
+        const label = s.name
+          ? `<strong>${s.name}</strong><br><small style="color:var(--secondary-text-color)">${s.statistic_id}</small>`
+          : s.statistic_id;
+        return `<div class="stat-option" data-value="${s.statistic_id}">${label}</div>`;
+      }).join("");
       dd.querySelectorAll(".stat-option[data-value]").forEach((el) => {
         el.addEventListener("mousedown", (e) => {
           e.preventDefault();
@@ -662,6 +679,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         ? `Dry run: would fix ${result.planned} row(s).`
         : `Fixed ${result.applied} row(s). Fix ID: <span class="fix-id-chip">${result.fix_id}</span>`;
       this._showStatus(hasErrors ? "error" : "success", msg);
+
+      if (dryRun && result.queries && result.queries.length) {
+        const pre = document.createElement("pre");
+        pre.style.cssText = "font-size:0.75rem;overflow-x:auto;background:var(--secondary-background-color,#f5f5f5);padding:12px;border-radius:4px;margin-top:8px;white-space:pre-wrap;word-break:break-all;";
+        pre.textContent = result.queries.join("\n\n");
+        this._q("scan-status").appendChild(pre);
+      }
 
       if (!dryRun) {
         const removed = new Set(this._selected);
