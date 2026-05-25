@@ -17,12 +17,22 @@ const METHOD_HELP = {
     body: `Flags rows whose <code>change</code> deviates unusually far from the median of peers
       at the same time of day. Safe for automations: if the data is flat or has no real spikes,
       nothing is flagged.`,
-    params: `<strong>MAD factor</strong> — how many deviations above the median counts as an outlier.
-      Higher = more conservative.
-      <em><code>6</code> catches clear spikes; <code>3</code> is aggressive; <code>10</code> is very strict.</em>`,
-    example: `A meter that normally accumulates <code>1–2 kWh/h</code> would need a change of
-      <code>~500 kWh</code> to be flagged at <code>factor 6</code>.
-      A slightly noisy hour at <code>2.5 kWh</code> would not be touched.`,
+    params: `<strong>MAD factor</strong> — the modified z-score threshold. A row is flagged when
+      <code>0.6745 × |change − median| / MAD ≥ factor</code>.
+      Practical range: <code>2</code>–<code>20</code>. Higher = stricter = fewer flags.<br>
+      <em>
+        <code>3.5</code> standard statistical threshold (~5× typical spread);&ensp;
+        <code>6</code> recommended default (~9× spread);&ensp;
+        <code>10</code> conservative (~15× spread);&ensp;
+        <code>20</code> extreme spikes only.
+      </em>
+      Values above <code>20</code> will rarely flag anything; <code>999999</code> is effectively
+      "never flag".`,
+    example: `Solar sensor with typical noon output of <code>1.5 kWh</code> and day-to-day variation of
+      <code>±0.3 kWh</code> (MAD ≈ <code>0.2 kWh</code>): at factor <code>6</code> a reading must
+      deviate more than <code>6 × 0.2 / 0.6745 ≈ 1.8 kWh</code> from the noon median to be flagged.
+      A cloudy-day reading of <code>0.9 kWh</code> (0.6 kWh below median) is untouched;
+      a data-corruption spike of <code>500 kWh</code> is flagged at any factor.`,
   },
   absolute: {
     title: "Absolute threshold",
@@ -393,7 +403,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
           </div>
           <div class="form-group" id="opt-mad">
             <label>MAD factor</label>
-            <input type="number" id="mad-factor" value="6" min="0.1" step="0.1">
+            <input type="number" id="mad-factor" value="6" min="1" max="50" step="0.5">
           </div>
           <div class="form-group hidden" id="opt-absolute">
             <label>Threshold</label>
