@@ -239,7 +239,8 @@ class TestApplyFixSyncHourly:
         spike = rows[1]
         assert spike["sum"] == pytest.approx(100.0)
 
-    def test_state_on_spike_row_set_to_previous_row_state(self, preloaded_conn):
+    def test_state_not_modified_on_spike_row(self, preloaded_conn):
+        """state must never be changed — HA recorder uses it as the meter-reading baseline."""
         conn = preloaded_conn
         apply_fix_sync(
             conn,
@@ -251,8 +252,8 @@ class TestApplyFixSyncHourly:
             fix_ts=time.time(),
         )
         rows = _lts_rows(conn, 1)
-        # Previous row (start_ts=0) had state=100.0
-        assert rows[1]["state"] == pytest.approx(100.0)
+        # Original state was 1_000_100.0 — must be untouched.
+        assert rows[1]["state"] == pytest.approx(1_000_100.0)
 
     def test_subsequent_rows_sum_shifted_forward(self, preloaded_conn):
         conn = preloaded_conn
@@ -381,12 +382,8 @@ class TestApplyFixSyncHourly:
         # spike sum = 1_000_100 + (-999_990) = 110
         assert rows[1]["sum"] == pytest.approx(110.0)
 
-    def test_state_preserves_sum_state_offset_for_nonzero_replacement(self, preloaded_conn):
-        """state at spike row = prev_state + replacement, preserving sum-state offset.
-
-        With replacement=10 and prev_state=100 → new state = 110.
-        Setting state=prev_state (100) would be wrong when replacement != 0.
-        """
+    def test_state_not_modified_for_nonzero_replacement(self, preloaded_conn):
+        """state must remain unchanged regardless of replacement value."""
         conn = preloaded_conn
         apply_fix_sync(
             conn,
@@ -398,7 +395,7 @@ class TestApplyFixSyncHourly:
             fix_ts=time.time(),
         )
         rows = _lts_rows(conn, 1)
-        assert rows[1]["state"] == pytest.approx(110.0)
+        assert rows[1]["state"] == pytest.approx(1_000_100.0)
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +442,8 @@ class TestApplyFixSync5Min:
         sts = _sts_rows(conn, 1)
         assert sts[1]["sum"] == pytest.approx(10.0)
 
-    def test_sts_spike_state_set_to_previous_row_state(self, preloaded_conn):
+    def test_sts_spike_state_not_modified(self, preloaded_conn):
+        """STS state must remain the original meter reading — HA uses it as restart baseline."""
         conn = preloaded_conn
         apply_fix_sync(
             conn,
@@ -457,7 +455,7 @@ class TestApplyFixSync5Min:
             fix_ts=time.time(),
         )
         sts = _sts_rows(conn, 1)
-        assert sts[1]["state"] == pytest.approx(10.0)
+        assert sts[1]["state"] == pytest.approx(1_000_010.0)
 
     def test_subsequent_sts_rows_shifted(self, preloaded_conn):
         conn = preloaded_conn
@@ -520,8 +518,8 @@ class TestApplyFixSync5Min:
         # The LTS first row (end of hour) should equal the last STS row's sum.
         assert lts_first_sum == pytest.approx(sts_last_sum)
 
-    def test_sts_state_preserves_sum_state_offset_for_nonzero_replacement(self, preloaded_conn):
-        """STS spike state = prev_sts_state + replacement."""
+    def test_sts_state_not_modified_for_nonzero_replacement(self, preloaded_conn):
+        """STS state must remain unchanged regardless of replacement value."""
         conn = preloaded_conn
         apply_fix_sync(
             conn,
@@ -533,20 +531,18 @@ class TestApplyFixSync5Min:
             fix_ts=time.time(),
         )
         sts = _sts_rows(conn, 1)
-        # prev_sts_state = 10.0, replacement = 5.0 → new state = 15.0
-        assert sts[1]["state"] == pytest.approx(15.0)
+        assert sts[1]["state"] == pytest.approx(1_000_010.0)
 
-    def test_lts_state_updated_when_spike_is_last_sts_in_hour(self, conn):
-        """LTS state = prev_sts_state + replacement when spike is last STS row in hour."""
+    def test_lts_state_not_modified_when_spike_is_last_sts_in_hour(self, conn):
+        """LTS state must remain unchanged — HA compiler derives it from live STS on restart."""
         _insert_meta(conn, 1)
         ensure_backup_table(conn)
-        # Spike at t=300 is the ONLY (and therefore last) STS row in the 0–3600 hour.
         _insert_sts(conn, 1, [
-            (0.0,   10.0,      10.0),       # normal
+            (0.0,   10.0,      10.0),
             (300.0, 1_000_010.0, 1_000_010.0),  # SPIKE — last in hour 0
         ])
         _insert_lts(conn, 1, [
-            (-3600.0, 5.0,       5.0),      # previous LTS hour (prev_lts)
+            (-3600.0, 5.0,         5.0),
             (0.0,     1_000_010.0, 1_000_010.0),  # enclosing LTS hour
         ])
         apply_fix_sync(
@@ -559,9 +555,8 @@ class TestApplyFixSync5Min:
             fix_ts=time.time(),
         )
         lts = _lts_rows(conn, 1)
-        # enclosing LTS row (start_ts=0): state should = prev_sts_state + replacement = 10 + 7 = 17
         enclosing = next(r for r in lts if r["start_ts"] == pytest.approx(0.0))
-        assert enclosing["state"] == pytest.approx(17.0)
+        assert enclosing["state"] == pytest.approx(1_000_010.0)
 
     def test_backup_includes_sts_rows(self, preloaded_conn):
         conn = preloaded_conn

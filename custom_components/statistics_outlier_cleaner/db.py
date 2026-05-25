@@ -213,62 +213,6 @@ def apply_fix_sync(
                 (delta, metadata_id, lts_spike_ts),
             )
 
-            # 3. Fix state on the STS spike row
-            prev_sts = conn.execute(
-                "SELECT state FROM statistics_short_term"
-                " WHERE metadata_id = ? AND start_ts < ?"
-                " ORDER BY start_ts DESC LIMIT 1",
-                (metadata_id, sts_spike_ts),
-            ).fetchone()
-            # new_state = prev_state + replacement preserves the sum-state offset (C = sum - state).
-            # Setting state = prev_state is only correct when replacement = 0.
-            new_sts_state = (prev_sts["state"] + replacement) if prev_sts is not None else None
-            if new_sts_state is not None:
-                conn.execute(
-                    "UPDATE statistics_short_term"
-                    " SET state = ? WHERE metadata_id = ? AND ABS(start_ts - ?) < 0.5",
-                    (new_sts_state, metadata_id, sts_spike_ts),
-                )
-
-            # 4. Fix state on the LTS spike row
-            if not is_5min:
-                # Hourly candidate: fix LTS state directly
-                prev_lts = conn.execute(
-                    "SELECT state FROM statistics"
-                    " WHERE metadata_id = ? AND start_ts < ?"
-                    " ORDER BY start_ts DESC LIMIT 1",
-                    (metadata_id, lts_spike_ts),
-                ).fetchone()
-                if prev_lts is not None:
-                    conn.execute(
-                        "UPDATE statistics"
-                        " SET state = ? WHERE metadata_id = ? AND ABS(start_ts - ?) < 0.5",
-                        (prev_lts["state"] + replacement, metadata_id, lts_spike_ts),
-                    )
-            else:
-                # 5-minute candidate: fix LTS state only if this STS row
-                # is the last sample in the enclosing hour.  Use the corrected
-                # STS state (prev_sts_state + replacement) — not prev_lts_state —
-                # because LTS state should equal the end-of-hour STS reading.
-                lts_end_ts = lts_spike_ts + 3600.0
-                last_in_hour = conn.execute(
-                    "SELECT MAX(start_ts) AS max_ts FROM statistics_short_term"
-                    " WHERE metadata_id = ? AND start_ts >= ? AND start_ts < ?",
-                    (metadata_id, lts_spike_ts, lts_end_ts),
-                ).fetchone()
-                if (
-                    new_sts_state is not None
-                    and last_in_hour is not None
-                    and last_in_hour["max_ts"] is not None
-                    and abs(last_in_hour["max_ts"] - sts_spike_ts) < 0.5
-                ):
-                    conn.execute(
-                        "UPDATE statistics"
-                        " SET state = ?"
-                        " WHERE metadata_id = ? AND ABS(start_ts - ?) < 0.5",
-                        (new_sts_state, metadata_id, lts_spike_ts),
-                    )
-
             conn.execute("COMMIT")
             _LOGGER.info(
                 "Applied fix %s: %s at start_ts=%s, delta=%s",
