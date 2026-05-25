@@ -14,49 +14,69 @@ const METHOD_HELP = {
   mad: {
     title: "MAD — Median Absolute Deviation",
     safe: true,
-    body: `Flags rows whose <code>change</code> deviates unusually far from the median of peers
-      at the same time of day. Safe for automations: if the data is flat or has no real spikes,
-      nothing is flagged.`,
-    params: `<strong>MAD factor</strong> — the modified z-score threshold. A row is flagged when
-      <code>0.6745 × |change − median| / MAD ≥ factor</code>.
-      Practical range: <code>2</code>–<code>20</code>. Higher = stricter = fewer flags.<br>
-      <em>
-        <code>3.5</code> standard statistical threshold (~5× typical spread);&ensp;
-        <code>6</code> recommended default (~9× spread);&ensp;
-        <code>10</code> conservative (~15× spread);&ensp;
-        <code>20</code> extreme spikes only.
-      </em>
-      Values above <code>20</code> will rarely flag anything; <code>999999</code> is effectively
-      "never flag".`,
-    example: `Solar sensor with typical noon output of <code>1.5 kWh</code> and day-to-day variation of
-      <code>±0.3 kWh</code> (MAD ≈ <code>0.2 kWh</code>): at factor <code>6</code> a reading must
-      deviate more than <code>6 × 0.2 / 0.6745 ≈ 1.8 kWh</code> from the noon median to be flagged.
-      A cloudy-day reading of <code>0.9 kWh</code> (0.6 kWh below median) is untouched;
-      a data-corruption spike of <code>500 kWh</code> is flagged at any factor.`,
+    summary: `Looks at each reading in context — comparing it to other readings at the same time
+      of day. Only flags values that are unusually large compared to typical variation for that hour.
+      Safe for automations: if your sensor has no spikes, nothing will be flagged.`,
+    example: {
+      scenario: "Solar panel: typical noon output ~1.5 kWh, day-to-day variation ±0.3 kWh.",
+      result: "At factor 6, a reading must deviate more than ~1.8 kWh from the usual noon value to be flagged.",
+      cases: [
+        { label: "0.9 kWh on a cloudy day", outcome: "untouched — normal variation", ok: true },
+        { label: "500 kWh data glitch", outcome: "flagged at any factor", ok: false },
+      ],
+    },
+    paramName: "MAD factor",
+    paramHint: "Range 2–20 · higher = stricter = fewer flags",
+    paramRows: [
+      { value: "3.5", label: "Sensitive",     desc: "Catches most real outliers; may also flag some normal variation" },
+      { value: "6",   label: "Recommended",   desc: "Good balance for most sensors", recommended: true },
+      { value: "10",  label: "Conservative",  desc: "Only flags obvious spikes" },
+      { value: "20",  label: "Extreme only",  desc: "Only data corruption or severe glitches" },
+    ],
+    formula: "0.6745 × |change − median| / MAD ≥ factor",
   },
   absolute: {
     title: "Absolute threshold",
     safe: true,
-    body: `Flags any row where <code>|change| ≥ threshold</code>. Simple and predictable — set the
-      <code>threshold</code> just above the physical maximum your sensor can legitimately produce
-      in one period.`,
-    params: `<strong>Threshold</strong> — minimum <code>|change|</code> to flag.
-      <em>Examples: solar inverter rated <code>8 kW</code> → threshold <code>10</code>;
-      gas meter max <code>3 m³/h</code> → threshold <code>3</code>.</em>`,
-    example: `<code>sensor.solar_energy</code>, <code>threshold 15</code>: any hour showing more than
-      <code>15 kWh</code> is flagged. Normal peaks (<code>7 kWh</code> on a sunny afternoon)
-      are never touched.`,
+    summary: `Flags any reading where the recorded change is equal to or larger than the number you
+      set. Simple and predictable — set the threshold just above the maximum your sensor can
+      physically produce in one period.`,
+    example: {
+      cases: [
+        { label: "Solar inverter rated 8 kW → threshold 10",   outcome: "any hour above 10 kWh flagged", ok: false },
+        { label: "Gas meter max flow 3 m³/h → threshold 3",    outcome: "any hour above 3 m³ flagged",   ok: false },
+        { label: "Normal peak of 7 kWh on a sunny afternoon",  outcome: "untouched",                     ok: true  },
+      ],
+    },
+    paramName: "Threshold",
+    paramHint: "Any |change| equal to or above this value is flagged",
+    paramRows: [
+      { value: "—", label: "Your sensor's physical maximum", desc: "Find the rated max output per period and add a small safety margin (e.g. ×1.2)" },
+    ],
+    formula: "|change| ≥ threshold",
   },
   top_n: {
-    title: "Top N (manual use only)",
+    title: "Top N",
     safe: false,
-    body: `Always returns the <code>N</code> largest changes — even on perfectly clean data with no
-      real spikes. This matches the built-in Developer Tools → Statistics dialog.`,
-    params: `<strong>N</strong> — how many rows to return.
-      <em><code>10</code> is a good starting point for manual review.</em>`,
-    example: `⚠️ If your sensor has no spikes, <code>Top N</code> will still flag the <code>N</code>
-      largest normal readings and overwrite them if you apply the fix. Always review results before
-      applying. This method is intentionally blocked in the <code>clean_outliers</code> service.`,
+    warning: `This method always returns N results — even if your data has no real outliers. If your
+      sensor is perfectly healthy, Top N will still flag the N largest normal readings and overwrite
+      them if you apply a fix. Always review results carefully before applying. This method is
+      blocked in the <code>clean_outliers</code> automation service for this reason.`,
+    summary: `Returns a list of your N biggest recorded changes, regardless of whether any of them
+      are genuine outliers. Useful for one-off manual inspection — the same view as the built-in
+      Developer Tools → Statistics dialog.`,
+    example: {
+      cases: [
+        { label: "Perfectly normal sensor, N = 10",    outcome: "10 normal readings returned and flagged anyway", ok: false },
+        { label: "One genuine spike + N = 10",         outcome: "the spike plus 9 normal readings returned",     ok: false },
+      ],
+    },
+    paramName: "N",
+    paramHint: "How many of the largest changes to return",
+    paramRows: [
+      { value: "10", label: "Good starting point", desc: "Returns the 10 largest changes for manual review" },
+    ],
+    formula: "Always returns the N rows with the largest |change| value",
   },
 };
 
@@ -142,14 +162,27 @@ const STYLES = `
     box-shadow: 0 4px 8px rgba(0,0,0,.1);
   }
   .stat-dropdown.hidden { display: none; }
+  .stat-section-label {
+    padding: 6px 10px 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--secondary-text-color);
+    background: var(--secondary-background-color, #f5f5f5);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
   .stat-option {
-    padding: 8px 10px;
+    padding: 7px 10px;
     cursor: pointer;
     font-size: 0.875rem;
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.4;
   }
+  .stat-option small { display: block; font-size: 0.75rem; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .stat-option:hover, .stat-option.active {
     background: rgba(var(--rgb-primary-color, 3,169,244), 0.1);
   }
@@ -158,6 +191,8 @@ const STYLES = `
     cursor: default;
     font-style: italic;
   }
+  .stat-option.recent-item { display: flex; align-items: flex-start; gap: 7px; }
+  .stat-recent-icon { flex-shrink: 0; opacity: 0.45; font-size: 0.9rem; line-height: 1.4; }
   button {
     padding: 0 16px;
     height: 36px;
@@ -192,10 +227,10 @@ const STYLES = `
   tr:hover td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.05); }
   tr.selected td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.1); }
   td.change-cell { font-family: monospace; }
-  .status { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; }
-  .status.info    { background: #e3f2fd; color: #1565c0; }
-  .status.success { background: #e8f5e9; color: #2e7d32; }
-  .status.error   { background: #ffebee; color: #c62828; }
+  .status { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; border-left: 3px solid; }
+  .status.info    { background: rgba(var(--rgb-primary-color, 3,169,244), 0.1); color: var(--primary-text-color); border-left-color: var(--primary-color, #03a9f4); }
+  .status.success { background: rgba(var(--rgb-success-color, 76,175,80), 0.1); color: var(--primary-text-color); border-left-color: var(--success-color, #4caf50); }
+  .status.error   { background: rgba(var(--rgb-error-color, 219,68,55), 0.1); color: var(--primary-text-color); border-left-color: var(--error-color, #db4437); }
   .meta { font-size: 0.8rem; color: var(--secondary-text-color); margin-bottom: 10px; }
   .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
   .selection-label { font-size: 0.85rem; color: var(--secondary-text-color); }
@@ -213,27 +248,95 @@ const STYLES = `
   .method-help {
     margin-top: 4px;
     margin-bottom: 12px;
-    padding: 10px 14px;
+    padding: 12px 14px;
     border: 1px solid var(--divider-color, #e0e0e0);
     border-left: 3px solid var(--primary-color, #03a9f4);
     border-radius: 4px;
     font-size: 0.85rem;
+    line-height: 1.6;
+  }
+  .method-help.warn { border-left-color: var(--warning-color, #f59e0b); }
+  .mh-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .mh-title { font-size: 0.875rem; font-weight: 600; }
+  .mh-summary { margin: 0 0 0; color: var(--primary-text-color); }
+  .mh-warning {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: rgba(var(--rgb-warning-color, 255,152,0), 0.1);
+    border: 1px solid var(--warning-color, #ff9800);
+    border-radius: 4px;
+    font-size: 0.8rem;
     line-height: 1.5;
   }
-  .method-help.warn {
-    border-left-color: var(--warning-color, #f59e0b);
+  .mh-section {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--divider-color, #e0e0e0);
   }
-  .method-help h4 { margin: 0 0 6px; font-size: 0.875rem; font-weight: 600; }
-  .method-help p { margin: 4px 0; }
-  .method-help .help-label {
-    display: inline-block;
+  .mh-label {
+    display: block;
     font-size: 0.7rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--secondary-text-color);
+    margin-bottom: 6px;
+  }
+  .mh-param-hint {
+    font-size: 0.7rem;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .mh-scenario { margin: 0 0 6px; color: var(--secondary-text-color); font-style: italic; font-size: 0.8rem; }
+  .mh-cases { display: flex; flex-direction: column; gap: 4px; }
+  .mh-case { display: flex; align-items: baseline; gap: 6px; font-size: 0.85rem; }
+  .mh-case-icon { font-weight: 700; flex-shrink: 0; width: 14px; font-size: 0.8rem; }
+  .mh-case.ok  .mh-case-icon { color: var(--success-color, #4caf50); }
+  .mh-case.bad .mh-case-icon { color: var(--error-color, #db4437); }
+  .mh-case-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--secondary-text-color); }
+  .mh-param-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 2px; }
+  .mh-param-table td {
+    padding: 4px 8px 4px 0;
+    vertical-align: top;
+    border-bottom: none;
+    background: none !important;
+  }
+  .mh-param-table tr:hover td { background: none !important; }
+  .mh-param-table .pv { width: 44px; }
+  .mh-param-table .pv code { font-size: 0.85rem; }
+  .mh-param-table .pl { width: 140px; font-weight: 500; padding-right: 12px; }
+  .mh-param-table .pd { color: var(--secondary-text-color); }
+  .mh-param-table tr.recommended td { color: var(--primary-color, #03a9f4); }
+  .mh-param-table tr.recommended .pd { color: var(--primary-color, #03a9f4); opacity: 0.85; }
+  .mh-formula {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--divider-color, #e0e0e0);
+  }
+  .mh-formula summary {
+    cursor: pointer;
+    color: var(--secondary-text-color);
+    user-select: none;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    list-style: none;
+  }
+  .mh-formula summary::-webkit-details-marker { display: none; }
+  .mh-formula summary::before { content: "▸ "; }
+  details[open].mh-formula summary::before { content: "▾ "; }
+  .mh-formula summary:hover { color: var(--primary-text-color); }
+  .mh-formula-code {
+    display: block;
     margin-top: 6px;
-    margin-bottom: 2px;
+    padding: 8px 10px;
+    background: var(--secondary-background-color, #f5f5f5);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-all;
   }
   .safe-badge {
     display: inline-block;
@@ -244,26 +347,80 @@ const STYLES = `
     font-weight: 600;
     vertical-align: middle;
   }
-  .safe-badge.yes { background: #dcfce7; color: #166534; }
-  .safe-badge.no  { background: #fee2e2; color: #991b1b; }
-  code { font-family: monospace; background: var(--secondary-background-color, #f5f5f5); padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
-  .recent-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .recent-pills.hidden { display: none; }
-  .recent-pill {
-    height: 24px;
+  .safe-badge.yes { background: rgba(var(--rgb-success-color, 76,175,80), 0.15); color: var(--success-color, #4caf50); }
+  .safe-badge.no  { background: rgba(var(--rgb-error-color, 219,68,55), 0.15); color: var(--error-color, #db4437); }
+  .seg-control {
+    display: inline-flex;
+    border: 1px solid var(--divider-color, #e0e0e0);
+    border-radius: 6px;
+    overflow: hidden;
+    height: 40px;
+  }
+  .seg-btn {
+    padding: 0 16px;
+    height: 40px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--secondary-text-color);
+    font-size: 0.875rem;
+    font-weight: 400;
+    cursor: pointer;
+    border-right: 1px solid var(--divider-color, #e0e0e0);
+    transition: background 0.15s, color 0.15s;
+  }
+  .seg-btn:last-child { border-right: none; }
+  .seg-btn.active {
+    background: var(--primary-color, #03a9f4);
+    color: #fff;
+    font-weight: 500;
+  }
+  .seg-btn:hover:not(.active) {
+    background: rgba(var(--rgb-primary-color, 3,169,244), 0.08);
+    color: var(--primary-text-color);
+  }
+  .stat-selected-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 0 10px;
     border: 1px solid var(--divider-color, #e0e0e0);
-    border-radius: 12px;
-    background: var(--secondary-background-color, #f5f5f5);
-    color: var(--primary-text-color);
-    font-size: 0.75rem;
-    cursor: pointer;
-    white-space: nowrap;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    border-radius: 4px;
+    background: var(--card-background-color, #fff);
+    height: 40px;
+    box-sizing: border-box;
+    width: 100%;
   }
-  .recent-pill:hover { border-color: var(--primary-color, #03a9f4); color: var(--primary-color, #03a9f4); }
+  .stat-sel-name { font-size: 0.9rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stat-sel-id { font-size: 0.75rem; color: var(--secondary-text-color); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .scan-stats-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .scan-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 80px;
+    padding: 8px 14px;
+    background: var(--secondary-background-color, #f5f5f5);
+    border-radius: 8px;
+  }
+  .scan-stat-val { font-size: 1.4rem; font-weight: 600; line-height: 1.2; }
+  .scan-stat-lbl { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--secondary-text-color); margin-top: 2px; }
+  .apply-summary {
+    padding: 10px 14px;
+    border-radius: 6px;
+    background: rgba(var(--rgb-error-color, 219,68,55), 0.06);
+    border: 1px solid rgba(var(--rgb-error-color, 219,68,55), 0.25);
+    font-size: 0.875rem;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+  .apply-summary strong { color: var(--error-color, #db4437); }
+  code { font-family: monospace; background: var(--secondary-background-color, #f5f5f5); padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
 `;
 
 class StatisticsOutlierCleanerPanel extends HTMLElement {
@@ -287,7 +444,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._hass = hass;
     if (firstSet) {
       this._render();
-      this._renderRecentPills();
       this._loadStatistics();
       this._loadHistory();
     }
@@ -331,25 +487,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     try {
       localStorage.setItem("statistics_outlier_cleaner_recents", JSON.stringify(this._recentStats));
     } catch (_) {}
-    this._renderRecentPills();
-  }
-
-  _renderRecentPills() {
-    const container = this._q("recent-pills");
-    if (!container) return;
-    if (!this._recentStats.length) {
-      container.classList.add("hidden");
-      return;
-    }
-    container.classList.remove("hidden");
-    container.innerHTML = this._recentStats.map((s) => {
-      const label = (s.name || s.statistic_id).slice(0, 28);
-      const title = s.name ? `${s.name}\n${s.statistic_id}` : s.statistic_id;
-      return `<button class="recent-pill" data-value="${s.statistic_id}" title="${title}">${label}</button>`;
-    }).join("");
-    container.querySelectorAll(".recent-pill").forEach((btn) => {
-      btn.addEventListener("click", () => this._selectStat(btn.dataset.value));
-    });
   }
 
   // ---------------------------------------------------------------------------
@@ -375,11 +512,14 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
           <div class="form-group stat-autocomplete" id="stat-wrap">
             <label>Statistic</label>
             <input type="text" id="stat-input" placeholder="Type to search statistics…" autocomplete="off">
+            <div id="stat-selected" class="stat-selected-display hidden">
+              <span id="stat-selected-name" class="stat-sel-name"></span>
+              <span id="stat-selected-id" class="stat-sel-id"></span>
+              <button class="text-btn" id="btn-clear-stat" type="button" title="Change statistic">✕ Change</button>
+            </div>
             <div class="stat-dropdown hidden" id="stat-dropdown"></div>
           </div>
         </div>
-
-        <div class="recent-pills hidden" id="recent-pills"></div>
 
         <div class="form-row">
           <div class="form-group">
@@ -395,11 +535,11 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         <div class="form-row">
           <div class="form-group">
             <label>Detection method</label>
-            <select id="method">
-              <option value="mad">MAD — safe for automation</option>
-              <option value="absolute">Absolute threshold</option>
-              <option value="top_n">Top N (like dev tools)</option>
-            </select>
+            <div class="seg-control" id="method-seg" role="group" aria-label="Detection method">
+              <button class="seg-btn active" data-value="mad" type="button">MAD</button>
+              <button class="seg-btn" data-value="absolute" type="button">Absolute</button>
+              <button class="seg-btn" data-value="top_n" type="button">Top N</button>
+            </div>
           </div>
           <div class="form-group" id="opt-mad">
             <label>MAD factor</label>
@@ -426,7 +566,11 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
       <div id="results-card" class="card hidden">
         <h3>Detected Outliers</h3>
-        <div id="scan-meta" class="meta"></div>
+        <div id="scan-stats-row" class="scan-stats-row hidden"></div>
+        <details id="scan-detail" class="hidden" style="margin-bottom:10px">
+          <summary style="cursor:pointer;font-size:0.75rem;color:var(--secondary-text-color);user-select:none">Statistical detail</summary>
+          <div id="scan-meta" class="meta" style="margin-top:4px"></div>
+        </details>
 
         <div class="toolbar">
           <button class="text-btn" id="btn-select-all">Select all</button>
@@ -437,16 +581,17 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         <div id="results-table"></div>
 
         <div id="apply-area" class="hidden" style="margin-top:14px">
+          <div id="apply-summary" class="apply-summary"></div>
           <div class="fix-controls">
             <div class="form-group">
-              <label>Replacement change</label>
+              <label>Replace each reading with</label>
               <input type="number" id="replacement" value="0" step="0.001">
             </div>
             <label class="dry-run-row">
               <input type="checkbox" id="dry-run">
-              Dry run (no DB changes)
+              Preview only (no DB changes)
             </label>
-            <button class="danger" id="btn-apply">Apply Fix to Selected</button>
+            <button class="danger" id="btn-apply">Apply Fix</button>
           </div>
         </div>
       </div>
@@ -462,13 +607,22 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   }
 
   _wireEvents() {
-    this._q("method").addEventListener("change", () => this._updateMethodOptions());
+    this._q("method-seg").querySelectorAll(".seg-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this._q("method-seg").querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        this._updateMethodOptions();
+      });
+    });
     this._updateMethodOptions(); // render initial help box
     this._q("btn-scan").addEventListener("click", () => this._scan());
     this._q("btn-apply").addEventListener("click", () => this._applyFix());
     this._q("btn-select-all").addEventListener("click", () => this._selectAll(true));
     this._q("btn-select-none").addEventListener("click", () => this._selectAll(false));
     this._q("btn-refresh-history").addEventListener("click", () => this._loadHistory());
+    this._q("btn-clear-stat").addEventListener("click", () => this._clearStat());
+    this._q("replacement").addEventListener("input", () => this._renderApplySummary());
+    this._q("dry-run").addEventListener("change", () => this._renderApplySummary());
 
     const input = this._q("stat-input");
     input.addEventListener("input", () => this._onStatInput());
@@ -482,8 +636,12 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
   _q(id) { return this.shadowRoot.getElementById(id); }
 
+  _getMethod() {
+    return this._q("method-seg")?.querySelector(".seg-btn.active")?.dataset.value || "mad";
+  }
+
   _updateMethodOptions() {
-    const m = this._q("method").value;
+    const m = this._getMethod();
     this._q("opt-mad").classList.toggle("hidden", m !== "mad");
     this._q("opt-absolute").classList.toggle("hidden", m !== "absolute");
     this._q("opt-top-n").classList.toggle("hidden", m !== "top_n");
@@ -493,17 +651,60 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   _renderMethodHelp(method) {
     const h = METHOD_HELP[method];
     if (!h) return;
+
     const safeBadge = h.safe
-      ? `<span class="safe-badge yes">✓ Safe for automation</span>`
+      ? `<span class="safe-badge yes">✓ Safe for automations</span>`
       : `<span class="safe-badge no">⚠ Manual use only</span>`;
+
+    const warningHtml = h.warning
+      ? `<div class="mh-warning">${h.warning}</div>`
+      : "";
+
+    const scenarioHtml = h.example.scenario
+      ? `<p class="mh-scenario">${h.example.scenario}</p>`
+      : "";
+
+    const casesHtml = h.example.cases.map((c) =>
+      `<div class="mh-case ${c.ok ? "ok" : "bad"}">
+        <span class="mh-case-icon">${c.ok ? "✓" : "✗"}</span>
+        <span><strong>${c.label}</strong> — ${c.outcome}</span>
+      </div>`
+    ).join("");
+
+    const resultHtml = h.example.result
+      ? `<p class="mh-case-note">${h.example.result}</p>`
+      : "";
+
+    const paramRowsHtml = h.paramRows.map((r) =>
+      `<tr class="${r.recommended ? "recommended" : ""}">
+        <td class="pv"><code>${r.value}</code></td>
+        <td class="pl">${r.label}</td>
+        <td class="pd">${r.desc}</td>
+      </tr>`
+    ).join("");
+
     this._q("method-help").innerHTML = `
       <div class="method-help ${h.safe ? "" : "warn"}">
-        <h4>${h.title}${safeBadge}</h4>
-        <p>${h.body}</p>
-        <span class="help-label">Parameter</span>
-        <p>${h.params}</p>
-        <span class="help-label">Example</span>
-        <p>${h.example}</p>
+        <div class="mh-header">
+          <span class="mh-title">${h.title}</span>
+          ${safeBadge}
+        </div>
+        <p class="mh-summary">${h.summary}</p>
+        ${warningHtml}
+        <div class="mh-section">
+          <span class="mh-label">Example</span>
+          ${scenarioHtml}
+          <div class="mh-cases">${casesHtml}</div>
+          ${resultHtml}
+        </div>
+        <div class="mh-section">
+          <span class="mh-label">${h.paramName} <span class="mh-param-hint">· ${h.paramHint}</span></span>
+          <table class="mh-param-table"><tbody>${paramRowsHtml}</tbody></table>
+        </div>
+        <details class="mh-formula">
+          <summary>Technical formula</summary>
+          <code class="mh-formula-code">${h.formula}</code>
+        </details>
       </div>`;
   }
 
@@ -519,31 +720,50 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   _showDropdown(filter) {
     const dd = this._q("stat-dropdown");
     const term = filter.trim().toLowerCase();
-    const matches = term
-      ? this._allStats.filter((s) =>
-          s.statistic_id.toLowerCase().includes(term) ||
-          (s.name || "").toLowerCase().includes(term)
-        )
-      : this._allStats;
 
-    if (!matches.length) {
-      dd.innerHTML = `<div class="stat-option no-results">${
-        this._allStats.length ? "No matches" : "Loading statistics…"
-      }</div>`;
+    const statOption = (s) => {
+      const label = s.name
+        ? `<strong>${s.name}</strong><small>${s.statistic_id}</small>`
+        : s.statistic_id;
+      return `<div class="stat-option" data-value="${s.statistic_id}">${label}</div>`;
+    };
+
+    if (!term) {
+      let html = "";
+      if (this._recentStats.length) {
+        html += `<div class="stat-section-label">Recent searches</div>`;
+        html += this._recentStats.map((s) => {
+          const display = s.name || s.statistic_id;
+          const sub = s.name ? `<small>${s.statistic_id}</small>` : "";
+          return `<div class="stat-option recent-item" data-value="${s.statistic_id}">
+            <span class="stat-recent-icon">↺</span>
+            <span>${display}${sub}</span>
+          </div>`;
+        }).join("");
+      }
+      if (this._allStats.length) {
+        if (this._recentStats.length) html += `<div class="stat-section-label">All statistics</div>`;
+        html += this._allStats.slice(0, 50).map(statOption).join("");
+      } else {
+        html += `<div class="stat-option no-results">Loading statistics…</div>`;
+      }
+      dd.innerHTML = html;
     } else {
-      dd.innerHTML = matches.slice(0, 50).map((s) => {
-        const label = s.name
-          ? `<strong>${s.name}</strong><br><small style="color:var(--secondary-text-color)">${s.statistic_id}</small>`
-          : s.statistic_id;
-        return `<div class="stat-option" data-value="${s.statistic_id}">${label}</div>`;
-      }).join("");
-      dd.querySelectorAll(".stat-option[data-value]").forEach((el) => {
-        el.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          this._selectStat(el.dataset.value);
-        });
-      });
+      const matches = this._allStats.filter((s) =>
+        s.statistic_id.toLowerCase().includes(term) ||
+        (s.name || "").toLowerCase().includes(term)
+      );
+      dd.innerHTML = matches.length
+        ? matches.slice(0, 50).map(statOption).join("")
+        : `<div class="stat-option no-results">${this._allStats.length ? "No matches" : "Loading statistics…"}</div>`;
     }
+
+    dd.querySelectorAll(".stat-option[data-value]").forEach((el) => {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        this._selectStat(el.dataset.value);
+      });
+    });
 
     this._activeIdx = -1;
     dd.classList.remove("hidden");
@@ -575,8 +795,22 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
   _selectStat(value) {
     this._statId = value;
-    this._q("stat-input").value = value;
+    const statMeta = this._allStats.find((s) => s.statistic_id === value);
+    const name = statMeta?.name;
+    this._q("stat-selected-name").textContent = name || value;
+    this._q("stat-selected-id").textContent = name ? value : "";
+    this._q("stat-input").classList.add("hidden");
+    this._q("stat-selected").classList.remove("hidden");
     this._closeDropdown();
+  }
+
+  _clearStat() {
+    this._statId = null;
+    this._q("stat-selected").classList.add("hidden");
+    const input = this._q("stat-input");
+    input.classList.remove("hidden");
+    input.value = "";
+    input.focus();
   }
 
   _closeDropdown() {
@@ -599,7 +833,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const statId = this._statId || this._q("stat-input").value.trim();
     if (!statId) { this._showStatus("error", "Select a statistic first."); return; }
 
-    const method = this._q("method").value;
+    const method = this._getMethod();
     const startVal = this._q("date-start").value;
     const endVal   = this._q("date-end").value;
 
@@ -646,13 +880,30 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const card = this._q("results-card");
     card.classList.remove("hidden");
 
-    this._q("scan-meta").textContent =
-      `Scanned ${report.scanned_rows} rows · Method: ${report.method}` +
-      (report.median != null ? ` · Median: ${report.median.toFixed(4)}` : "") +
-      (report.mad    != null ? ` · MAD: ${report.mad.toFixed(4)}`       : "");
+    // Stats row
+    const statsRow = this._q("scan-stats-row");
+    statsRow.innerHTML = `
+      <div class="scan-stat"><span class="scan-stat-val">${report.scanned_rows}</span><span class="scan-stat-lbl">rows scanned</span></div>
+      <div class="scan-stat"><span class="scan-stat-val">${this._candidates.length}</span><span class="scan-stat-lbl">flagged</span></div>
+      <div class="scan-stat"><span class="scan-stat-val" style="font-size:1rem;text-transform:uppercase">${report.method}</span><span class="scan-stat-lbl">method</span></div>
+    `;
+    statsRow.classList.remove("hidden");
+
+    // Collapsible stat detail
+    const parts = [`${report.scanned_rows} rows scanned`, `Method: ${report.method}`];
+    if (report.median != null) parts.push(`Median: ${report.median.toFixed(4)}`);
+    if (report.mad    != null) parts.push(`MAD: ${report.mad.toFixed(4)}`);
+    this._q("scan-meta").textContent = parts.join(" · ");
+    if (report.median != null || report.mad != null) {
+      this._q("scan-detail").classList.remove("hidden");
+    }
 
     if (!this._candidates.length) {
-      this._q("results-table").innerHTML = "<p>No outliers detected.</p>";
+      this._q("results-table").innerHTML = `
+        <div class="status success" style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:1.1rem">✓</span>
+          <span>No outliers detected in the selected date range.</span>
+        </div>`;
       this._q("apply-area").classList.add("hidden");
       this._updateSelectionCount();
       return;
@@ -660,6 +911,25 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
     this._renderTable();
     this._q("apply-area").classList.remove("hidden");
+    this._renderApplySummary();
+  }
+
+  _renderApplySummary() {
+    const n = this._selected.size;
+    const summaryEl = this._q("apply-summary");
+    const applyBtn = this._q("btn-apply");
+    if (!summaryEl || !applyBtn) return;
+    if (n === 0) {
+      summaryEl.innerHTML = "Select rows above to apply a fix.";
+      applyBtn.textContent = "Apply Fix";
+      return;
+    }
+    const replacement = this._q("replacement")?.value ?? "0";
+    const isDry = this._q("dry-run")?.checked;
+    summaryEl.innerHTML = isDry
+      ? `Preview: would replace <strong>${n} reading${n !== 1 ? "s" : ""}</strong> with <strong>${replacement}</strong> — no DB changes`
+      : `Replace <strong>${n} reading${n !== 1 ? "s" : ""}</strong> with <strong>${replacement}</strong>`;
+    applyBtn.textContent = isDry ? `Preview ${n} rows` : `Apply to ${n} rows`;
   }
 
   _renderTable() {
@@ -713,6 +983,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const n = this._selected.size, total = this._candidates.length;
     this._q("selection-count").textContent = n ? `${n} of ${total} selected` : "";
     this._q("btn-apply").disabled = n === 0;
+    this._renderApplySummary();
   }
 
   _updateCheckAll() {
@@ -770,7 +1041,11 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         if (this._candidates.length) {
           this._renderTable();
         } else {
-          this._q("results-table").innerHTML = "<p>No outliers remaining.</p>";
+          this._q("results-table").innerHTML = `
+            <div class="status success" style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:1.1rem">✓</span>
+              <span>All selected outliers have been fixed.</span>
+            </div>`;
           this._q("apply-area").classList.add("hidden");
         }
         this._loadHistory();
@@ -802,10 +1077,14 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
     const rows = fixes.map((f) => {
       const dt = new Date(f.fix_ts * 1000).toLocaleString();
+      const statMeta = this._allStats.find((s) => s.statistic_id === f.statistic_id);
+      const name = statMeta?.name;
+      const sensorCell = name
+        ? `<div style="font-weight:500;font-size:0.85rem">${name}</div><div style="font-size:0.75rem;color:var(--secondary-text-color)">${f.statistic_id}</div>`
+        : f.statistic_id;
       return `<tr>
         <td>${dt}</td>
-        <td><span class="fix-id-chip">${f.fix_id.slice(0, 8)}…</span></td>
-        <td>${f.statistic_id}</td>
+        <td>${sensorCell}</td>
         <td>${f.row_count}</td>
         <td><button class="text-btn restore-btn" data-fix-id="${f.fix_id}">Restore</button></td>
       </tr>`;
@@ -813,7 +1092,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
     div.innerHTML = `
       <table>
-        <thead><tr><th>Date</th><th>Fix ID</th><th>Sensor</th><th>Rows</th><th></th></tr></thead>
+        <thead><tr><th>Date</th><th>Sensor</th><th>Rows</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
 
