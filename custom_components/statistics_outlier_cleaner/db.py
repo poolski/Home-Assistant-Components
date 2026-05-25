@@ -117,6 +117,7 @@ def apply_fix_sync(
     planned = 0
     applied = 0
     errors: list[dict[str, Any]] = []
+    queries: list[str] = []
 
     for candidate in sorted(candidates, key=lambda c: c["start_ts"]):
         spike_ts: float = candidate["start_ts"]
@@ -152,6 +153,22 @@ def apply_fix_sync(
 
         planned += 1
         if dry_run:
+            queries.append(
+                f"INSERT INTO {_BACKUP_TABLE} (...) SELECT ... "
+                f"FROM statistics_short_term WHERE metadata_id = {metadata_id} AND start_ts >= {sts_spike_ts};"
+            )
+            queries.append(
+                f"INSERT INTO {_BACKUP_TABLE} (...) SELECT ... "
+                f"FROM statistics WHERE metadata_id = {metadata_id} AND start_ts >= {lts_spike_ts};"
+            )
+            queries.append(
+                f"UPDATE statistics_short_term SET sum = sum + {delta} "
+                f"WHERE metadata_id = {metadata_id} AND start_ts >= {sts_spike_ts};"
+            )
+            queries.append(
+                f"UPDATE statistics SET sum = sum + {delta} "
+                f"WHERE metadata_id = {metadata_id} AND start_ts >= {lts_spike_ts};"
+            )
             continue
 
         try:
@@ -274,6 +291,7 @@ def apply_fix_sync(
         "planned": planned,
         "applied": applied,
         "errors": errors,
+        "queries": queries,
     }
 
 

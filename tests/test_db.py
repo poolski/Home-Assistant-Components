@@ -883,3 +883,71 @@ class TestApplyFixSyncBoundedSpike:
         )
         rows = _lts_rows(preloaded_conn, 1)
         assert rows[2]["sum"] == pytest.approx(100.0)
+
+
+# ---------------------------------------------------------------------------
+# apply_fix_sync — dry-run SQL queries
+# ---------------------------------------------------------------------------
+
+
+class TestDryRunQueries:
+    def test_dry_run_returns_queries_list(self, conn):
+        _insert_meta(conn, 1)
+        ensure_backup_table(conn)
+        _insert_lts(conn, 1, [
+            (0.0, 100.0, 100.0),
+            (3600.0, 1_000_100.0, 1_000_100.0),
+            (7200.0, 1_000_101.0, 1_000_101.0),
+        ])
+        result = apply_fix_sync(
+            conn,
+            statistic_id="sensor.test",
+            metadata_id=1,
+            candidates=[{"start_ts": 3600.0, "period": "hour"}],
+            replacement=0.0,
+            fix_id=_fix_id(),
+            fix_ts=time.time(),
+            dry_run=True,
+        )
+        assert "queries" in result
+        assert isinstance(result["queries"], list)
+        assert len(result["queries"]) > 0
+
+    def test_dry_run_queries_contain_update(self, conn):
+        _insert_meta(conn, 1)
+        ensure_backup_table(conn)
+        _insert_lts(conn, 1, [
+            (0.0, 100.0, 100.0),
+            (3600.0, 1_000_100.0, 1_000_100.0),
+        ])
+        result = apply_fix_sync(
+            conn,
+            statistic_id="sensor.test",
+            metadata_id=1,
+            candidates=[{"start_ts": 3600.0, "period": "hour"}],
+            replacement=0.0,
+            fix_id=_fix_id(),
+            fix_ts=time.time(),
+            dry_run=True,
+        )
+        combined = "\n".join(result["queries"])
+        assert "UPDATE" in combined or "INSERT" in combined
+
+    def test_live_run_returns_empty_queries(self, conn):
+        _insert_meta(conn, 1)
+        ensure_backup_table(conn)
+        _insert_lts(conn, 1, [
+            (0.0, 100.0, 100.0),
+            (3600.0, 1_000_100.0, 1_000_100.0),
+        ])
+        result = apply_fix_sync(
+            conn,
+            statistic_id="sensor.test",
+            metadata_id=1,
+            candidates=[{"start_ts": 3600.0, "period": "hour"}],
+            replacement=0.0,
+            fix_id=_fix_id(),
+            fix_ts=time.time(),
+            dry_run=False,
+        )
+        assert result["queries"] == []
