@@ -237,6 +237,23 @@ const STYLES = `
   .safe-badge.yes { background: #dcfce7; color: #166534; }
   .safe-badge.no  { background: #fee2e2; color: #991b1b; }
   code { font-family: monospace; background: var(--secondary-background-color, #f5f5f5); padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
+  .recent-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .recent-pills.hidden { display: none; }
+  .recent-pill {
+    height: 24px;
+    padding: 0 10px;
+    border: 1px solid var(--divider-color, #e0e0e0);
+    border-radius: 12px;
+    background: var(--secondary-background-color, #f5f5f5);
+    color: var(--primary-text-color);
+    font-size: 0.75rem;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .recent-pill:hover { border-color: var(--primary-color, #03a9f4); color: var(--primary-color, #03a9f4); }
 `;
 
 class StatisticsOutlierCleanerPanel extends HTMLElement {
@@ -252,6 +269,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._statId = null;
     this._allStats = [];      // full list from WS
     this._activeIdx = -1;     // keyboard nav index in dropdown
+    this._recentStats = this._loadRecentStats();
   }
 
   set hass(hass) {
@@ -259,6 +277,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._hass = hass;
     if (firstSet) {
       this._render();
+      this._renderRecentPills();
       this._loadStatistics();
       this._loadHistory();
     }
@@ -281,6 +300,46 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     } catch (e) {
       this._allStats = [];
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Recent statistics (localStorage)
+  // ---------------------------------------------------------------------------
+
+  _loadRecentStats() {
+    try {
+      return JSON.parse(localStorage.getItem("statistics_outlier_cleaner_recents") || "[]");
+    } catch (_) {
+      return [];
+    }
+  }
+
+  _saveRecentStat(statistic_id, name) {
+    this._recentStats = this._recentStats.filter((s) => s.statistic_id !== statistic_id);
+    this._recentStats.unshift({ statistic_id, name: name || null });
+    this._recentStats = this._recentStats.slice(0, 5);
+    try {
+      localStorage.setItem("statistics_outlier_cleaner_recents", JSON.stringify(this._recentStats));
+    } catch (_) {}
+    this._renderRecentPills();
+  }
+
+  _renderRecentPills() {
+    const container = this._q("recent-pills");
+    if (!container) return;
+    if (!this._recentStats.length) {
+      container.classList.add("hidden");
+      return;
+    }
+    container.classList.remove("hidden");
+    container.innerHTML = this._recentStats.map((s) => {
+      const label = (s.name || s.statistic_id).slice(0, 28);
+      const title = s.name ? `${s.name}\n${s.statistic_id}` : s.statistic_id;
+      return `<button class="recent-pill" data-value="${s.statistic_id}" title="${title}">${label}</button>`;
+    }).join("");
+    container.querySelectorAll(".recent-pill").forEach((btn) => {
+      btn.addEventListener("click", () => this._selectStat(btn.dataset.value));
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -309,6 +368,8 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
             <div class="stat-dropdown hidden" id="stat-dropdown"></div>
           </div>
         </div>
+
+        <div class="recent-pills hidden" id="recent-pills"></div>
 
         <div class="form-row">
           <div class="form-group">
@@ -557,6 +618,8 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       this._selected = new Set(this._candidates.map((_, i) => i));
       this._renderResults(result);
       this._clearStatus();
+      const statMeta = this._allStats.find((s) => s.statistic_id === statId);
+      this._saveRecentStat(statId, statMeta?.name || null);
     } catch (e) {
       this._showStatus("error", `Scan failed: ${e.message || JSON.stringify(e)}`);
     } finally {
