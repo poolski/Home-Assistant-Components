@@ -188,41 +188,55 @@ def _algo_absolute(
     return [c for c in candidates if abs(c.change) >= threshold]
 
 
+_DAY_MS = 24 * 3_600_000
+
+# Per-period clock-jitter tolerance for time-of-day peer matching.
+_TOD_TOLERANCE_MS: dict[str, int] = {
+    "5minute": 30_000,   # ±30 seconds
+    "hour":   300_000,   # ±5 minutes
+}
+
+
 def _algo_mad(
     candidates: list[OutlierCandidate], mad_factor: float
-) -> tuple[list[OutlierCandidate], float, float]:
-    """Median Absolute Deviation method.
+) -> tuple[list[OutlierCandidate], float | None, float | None]:
+    """MAD with time-of-day peer grouping.
 
-    Modified z-score = 0.6745 * (x - median) / MAD.
-    Returns (flagged, median, mad).
+    Each candidate is judged against all other candidates that fall at the
+    same time of day, within the period-appropriate tolerance:
+      * ``"5minute"`` period: ±30 s
+      * ``"hour"`` period:   ±5 min
 
-    When MAD is zero (flat sensor), returns an empty list rather than
-    flagging everything — conservative behaviour for unattended use.
+    Candidates with fewer than 2 non-zero peers at their time of day are
+    skipped — conservative behaviour when there is not enough history.
+
+    Returns ``(flagged, None, None)`` — no single global baseline exists.
     """
     if not candidates:
-        return [], 0.0, 0.0
-
-    # Compute MAD on non-zero changes only.  Sensors that reset daily (e.g.
-    # pv_energy_today_kwh) have many zero-change rows at night; including them
-    # drives the median to 0 and collapses MAD to 0, hiding real spikes.
-    nonzero = [c for c in candidates if c.change != 0]
-    stat_candidates = nonzero if nonzero else candidates
-    values = [c.change for c in stat_candidates]
-    values_sorted = sorted(values)
-    median = _median_sorted(values_sorted)
-    deviations = sorted(abs(v - median) for v in values)
-    mad = _median_sorted(deviations)
-
-    if mad == 0:
-        _LOGGER.debug("MAD is zero — sensor appears flat. Skipping MAD detection.")
-        return [], median, 0.0
+        return [], None, None
 
     flagged: list[OutlierCandidate] = []
     for c in candidates:
+        tolerance = _TOD_TOLERANCE_MS.get(c.period, 300_000)
+        tod = c.start % _DAY_MS
+        peers = [
+            other for other in candidates
+            if abs((other.start % _DAY_MS) - tod) <= tolerance
+        ]
+        nonzero_peers = [p for p in peers if p.change != 0]
+        stat_peers = nonzero_peers if nonzero_peers else peers
+        if len(stat_peers) < 2:
+            continue
+        values = [p.change for p in stat_peers]
+        median = _median_sorted(sorted(values))
+        mad = _median_sorted(sorted(abs(v - median) for v in values))
+        if mad == 0:
+            continue
         modified_z = 0.6745 * (c.change - median) / mad
         if abs(modified_z) >= mad_factor:
             flagged.append(c)
-    return flagged, median, mad
+
+    return flagged, None, None
 
 
 def _median_sorted(sorted_values: list[float]) -> float:
@@ -331,7 +345,16 @@ async def scan_outliers(
             raise ValueError("absolute method requires a positive 'threshold' parameter")
         flagged = _algo_absolute(candidates, threshold)
     elif method == "mad":
-        flagged, median, mad = _algo_mad(candidates, mad_factor)
+        if period == "hybrid":
+            # Run MAD independently per period type to avoid scale contamination
+            # (hourly changes ~12× larger than 5-minute changes).
+            hour_cands = [c for c in candidates if c.period == "hour"]
+            fivemin_cands = [c for c in candidates if c.period == "5minute"]
+            h_flagged, _, _ = _algo_mad(hour_cands, mad_factor)
+            f_flagged, _, _ = _algo_mad(fivemin_cands, mad_factor)
+            flagged = h_flagged + f_flagged
+        else:
+            flagged, median, mad = _algo_mad(candidates, mad_factor)
     else:
         raise ValueError(f"Unknown method: {method!r}")
 

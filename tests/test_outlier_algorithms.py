@@ -220,91 +220,135 @@ class TestAlgoAbsolute:
 # ---------------------------------------------------------------------------
 
 
+_DAY_MS = 86_400_000
+_HOUR_MS = 3_600_000
+_5MIN_MS = 300_000
+
+
+def _multiday_hour(
+    n_days: int,
+    hour_of_day: int,
+    base: float = 1.0,
+    var: float = 0.1,
+) -> list[OutlierCandidate]:
+    """n_days of hourly data at a fixed hour-of-day, slightly varying so MAD > 0."""
+    import math
+    return [
+        _hour(d * _DAY_MS + hour_of_day * _HOUR_MS, base + var * math.sin(d))
+        for d in range(n_days)
+    ]
+
+
 class TestAlgoMad:
-    def _make_varying_with_spike(self, spike_change: float = 1_000_000.0) -> list[OutlierCandidate]:
-        """Varying data (0.5–1.5 kWh/h) with a single huge spike.
-
-        Using genuinely varying (not flat) normal values ensures MAD > 0 so
-        the algorithm has a baseline to compare against.  Pure-flat data
-        (all identical) yields MAD = 0 and correctly returns [] per the spec.
-        """
-        normal_changes = [0.5, 0.7, 0.9, 1.1, 1.3, 1.5, 0.8, 1.2, 0.6, 1.4]
-        normal = [_hour(i * 3_600_000, c) for i, c in enumerate(normal_changes)]
-        spike = _hour(200 * 3_600_000, spike_change)
-        return normal + [spike]
-
     def test_flags_obvious_spike(self):
-        candidates = self._make_varying_with_spike(1_000_000.0)
+        # 14 days at 10:00 ~1 kWh/h, then a spike on day 14.
+        candidates = _multiday_hour(14, hour_of_day=10)
+        candidates.append(_hour(14 * _DAY_MS + 10 * _HOUR_MS, 1_000_000.0))
         flagged, _, _ = _algo_mad(candidates, mad_factor=6.0)
         assert len(flagged) == 1
         assert flagged[0].change == 1_000_000.0
 
     def test_does_not_flag_clean_data(self):
-        # Slightly varying data; nothing extreme.
-        changes = [1.0, 1.1, 0.9, 1.05, 0.95, 1.02, 0.98, 1.0, 1.03, 0.97]
-        candidates = [_hour(i * 3_600_000, c) for i, c in enumerate(changes)]
+        # 14 days at 10:00, all normal — nothing should be flagged.
+        candidates = _multiday_hour(14, hour_of_day=10)
         flagged, _, _ = _algo_mad(candidates, mad_factor=6.0)
         assert flagged == []
 
-    def test_returns_median_and_mad(self):
-        # Use varying normal values so MAD > 0 (pure-flat data gives MAD=0).
-        values = [1.0, 1.1, 0.9, 1.05, 0.95, 1_000_000.0]
-        candidates = [_hour(i * 3_600_000, v) for i, v in enumerate(values)]
-        flagged, median, mad = _algo_mad(candidates, mad_factor=3.0)
-        assert median == pytest.approx(1.025)
-        assert mad > 0.0
-        assert len(flagged) == 1
-
-    def test_mad_zero_edge_case_returns_empty(self):
-        # All identical values → MAD = 0. Must return [] not everything.
-        candidates = [_hour(i * 3_600_000, 5.0) for i in range(20)]
-        flagged, median, mad = _algo_mad(candidates, mad_factor=6.0)
-        assert flagged == []
-        assert median == 5.0
-        assert mad == 0.0
+    def test_median_and_mad_are_none(self):
+        # Time-of-day grouping has no single global baseline.
+        candidates = _multiday_hour(14, hour_of_day=10)
+        _, median, mad = _algo_mad(candidates, mad_factor=6.0)
+        assert median is None
+        assert mad is None
 
     def test_empty_input(self):
         flagged, median, mad = _algo_mad([], mad_factor=6.0)
         assert flagged == []
-        assert median == 0.0
-        assert mad == 0.0
+        assert median is None
+        assert mad is None
+
+    def test_all_identical_values_not_flagged(self):
+        # MAD = 0 for all-identical values → skip, never flag.
+        candidates = [_hour(d * _DAY_MS + 10 * _HOUR_MS, 5.0) for d in range(14)]
+        flagged, _, _ = _algo_mad(candidates, mad_factor=6.0)
+        assert flagged == []
 
     def test_flags_negative_spike(self):
-        # With only 2 values the modified z-score is always 0.6745 (a constant),
-        # so add enough normal data to give the algorithm a real baseline.
-        normal = [_hour(i * 3_600_000, 1.0 + 0.1 * (i % 3 - 1)) for i in range(9)]
-        spike = _hour(100 * 3_600_000, -1_000_000.0)
-        candidates = normal + [spike]
+        candidates = _multiday_hour(14, hour_of_day=10)
+        candidates.append(_hour(14 * _DAY_MS + 10 * _HOUR_MS, -1_000_000.0))
         flagged, _, _ = _algo_mad(candidates, mad_factor=3.0)
         assert any(c.change == -1_000_000.0 for c in flagged)
 
     def test_mad_factor_sensitivity(self):
-        # Lower factor → more aggressive; higher factor → fewer flags.
-        candidates = self._make_varying_with_spike(50.0)
+        # Moderate spike: aggressive factor flags it, conservative does not.
+        candidates = _multiday_hour(14, hour_of_day=10)
+        candidates.append(_hour(14 * _DAY_MS + 10 * _HOUR_MS, 50.0))
         aggressive, _, _ = _algo_mad(candidates, mad_factor=3.0)
         conservative, _, _ = _algo_mad(candidates, mad_factor=10.0)
         assert len(aggressive) >= len(conservative)
 
-    def test_daily_reset_sensor_with_spike(self):
-        # pv_energy_today_kwh pattern: most hours are 0 (night), a few are
-        # small positive (daytime generation), one hour has a huge spike.
-        # With all zeros dominating, median=0 and naive MAD=0 → the algorithm
-        # must NOT silently return [] on this data; it must detect the spike.
-        t = 0
-        candidates = []
-        # 16 nighttime zero-change hours
-        for _ in range(16):
-            candidates.append(_hour(t, 0.0)); t += 3_600_000
-        # 7 normal daytime hours (0.5–1.5 kWh each)
-        for c in [0.5, 1.0, 1.5, 1.2, 0.8, 0.6, 0.4]:
-            candidates.append(_hour(t, c)); t += 3_600_000
-        # 1 spike hour
-        candidates.append(_hour(t, 500.0))
+    def test_insufficient_peers_skips_candidate(self):
+        # Only 1 data point per time-of-day → fewer than 2 peers → nothing flagged.
+        candidates = [_hour(h * _HOUR_MS, 1.0) for h in range(24)]
+        candidates.append(_hour(10 * _HOUR_MS + 1, 500.0))  # near hour 10 but unique tod
+        flagged, _, _ = _algo_mad(candidates, mad_factor=3.0)
+        # Every time-of-day group has at most 1 non-zero member → all skipped
+        assert flagged == []
 
-        flagged, median, mad = _algo_mad(candidates, mad_factor=3.0)
+    def test_daily_reset_multiday_with_spike(self):
+        # Solar sensor over 14 days: 8 nighttime zero-change hours + 8 varying
+        # daytime hours, then a spike at 10:00 on day 14.
+        import math
+        candidates = []
+        daytime_bases = [0.5, 1.0, 1.5, 1.2, 0.8, 0.6, 0.4, 0.3]
+        for day in range(14):
+            for h in range(8):  # night
+                candidates.append(_hour(day * _DAY_MS + h * _HOUR_MS, 0.0))
+            for i, base in enumerate(daytime_bases):
+                c = base * (1.0 + 0.05 * math.sin(day + i))
+                candidates.append(_hour(day * _DAY_MS + (8 + i) * _HOUR_MS, c))
+        # Spike at 10:00 (hour index 10, i.e. 8+2 in daytime, base=1.5)
+        candidates.append(_hour(14 * _DAY_MS + 10 * _HOUR_MS, 500.0))
+
+        flagged, _, mad = _algo_mad(candidates, mad_factor=3.0)
         assert len(flagged) == 1
         assert flagged[0].change == 500.0
-        assert mad > 0.0  # MAD computed on non-zero changes only
+        assert mad is None  # no single global baseline
+
+
+# ---------------------------------------------------------------------------
+# _algo_mad — hybrid per-period isolation
+# ---------------------------------------------------------------------------
+
+
+class TestHybridMadPerPeriod:
+    """Validates that mixing hourly and 5-minute rows in one MAD call causes
+    scale contamination — which is why scan_outliers splits them first."""
+
+    def test_fivemin_only_detects_spike(self):
+        # 14 days of 5-min rows at 10:00, ~0.125 kWh each, plus 1 spike.
+        import math
+        normal = [
+            _five_min(d * _DAY_MS + 10 * _HOUR_MS, 0.125 + 0.01 * math.sin(d))
+            for d in range(14)
+        ]
+        spike = _five_min(14 * _DAY_MS + 10 * _HOUR_MS, 500.0)
+        candidates = normal + [spike]
+        flagged, _, _ = _algo_mad(candidates, mad_factor=6.0)
+        assert len(flagged) == 1
+        assert flagged[0].change == 500.0
+
+    def test_hourly_only_detects_spike(self):
+        import math
+        normal = [
+            _hour(d * _DAY_MS + 10 * _HOUR_MS, 1.5 + 0.1 * math.sin(d))
+            for d in range(14)
+        ]
+        spike = _hour(14 * _DAY_MS + 10 * _HOUR_MS, 500.0)
+        candidates = normal + [spike]
+        flagged, _, _ = _algo_mad(candidates, mad_factor=6.0)
+        assert len(flagged) == 1
+        assert flagged[0].change == 500.0
 
 
 # ---------------------------------------------------------------------------
