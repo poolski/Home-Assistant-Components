@@ -68,3 +68,31 @@ async def test_restore_fix_schema_accepts_fix_id(setup_component: HomeAssistant)
     """Service schema should accept a call with a fix_id."""
     hass = setup_component
     assert hass.services.has_service(DOMAIN, "restore_fix")
+
+
+async def test_ws_fetch_outliers_accepts_lookback_days(
+    setup_component: HomeAssistant,
+    hass_ws_client,
+):
+    """ws_fetch_outliers must not reject a lookback_days parameter."""
+    hass = setup_component
+    client = await hass_ws_client(hass)
+
+    await client.send_json(
+        {
+            "id": 1,
+            "type": f"{DOMAIN}/fetch_outliers",
+            "statistic_id": "sensor.nonexistent",
+            "lookback_days": 16,
+        }
+    )
+    msg = await client.receive_json()
+
+    # Schema validation failure ("extra keys not allowed") returns type="result"
+    # with success=False and code="invalid_format".  Any other response (including
+    # a successful scan that finds no data) means the field was accepted.
+    assert not (
+        msg.get("type") == "result"
+        and msg.get("success") is False
+        and "lookback_days" in msg.get("error", {}).get("message", "")
+    ), f"ws_fetch_outliers rejected lookback_days: {msg}"
