@@ -70,6 +70,26 @@ async def test_restore_fix_schema_accepts_fix_id(setup_component: HomeAssistant)
     assert hass.services.has_service(DOMAIN, "restore_fix")
 
 
+async def test_list_sum_statistics_enriches_friendly_name(
+    setup_component: HomeAssistant,
+    hass_ws_client,
+):
+    """list_sum_statistics must attach friendly_name from hass.states when name is null."""
+    hass = setup_component
+    hass.states.async_set(
+        "sensor.test_power",
+        "100",
+        {"friendly_name": "Test Power Meter"},
+    )
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 10, "type": f"{DOMAIN}/list_sum_statistics"})
+    msg = await client.receive_json()
+    stats = msg.get("result", {}).get("statistics", [])
+    match = next((s for s in stats if s["statistic_id"] == "sensor.test_power"), None)
+    if match:
+        assert match.get("name") == "Test Power Meter"
+
+
 async def test_ws_fetch_outliers_accepts_lookback_days(
     setup_component: HomeAssistant,
     hass_ws_client,

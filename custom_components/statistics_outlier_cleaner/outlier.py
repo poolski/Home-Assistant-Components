@@ -88,10 +88,20 @@ class OutlierReport:
 
 
 async def get_sum_statistic_ids(hass: HomeAssistant) -> list[dict[str, Any]]:
-    """Return statistic IDs that have a sum (total / total_increasing)."""
+    """Return statistic IDs that have a sum, enriched with friendly names from hass.states."""
     recorder = get_instance(hass)
     all_ids = await recorder.async_add_executor_job(list_statistic_ids, hass)
-    return [s for s in all_ids if s.get("has_sum")]
+    results = []
+    for s in all_ids:
+        if not s.get("has_sum"):
+            continue
+        entry = dict(s)
+        if not entry.get("name"):
+            state = hass.states.get(s["statistic_id"])
+            if state:
+                entry["name"] = state.attributes.get("friendly_name")
+        results.append(entry)
+    return results
 
 
 async def is_sum_statistic(hass: HomeAssistant, statistic_id: str) -> bool:
