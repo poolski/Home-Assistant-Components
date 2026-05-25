@@ -258,7 +258,13 @@ def _algo_mad(
         values = [p.change for p in stat_peers]
         median = _median_sorted(sorted(values))
         mad = _median_sorted(sorted(abs(v - median) for v in values))
-        if mad == 0:
+        # Guard against near-zero MAD from floating-point noise.
+        # HA computes `change` as sum[i] - sum[i-1]; when sums are large (e.g.
+        # 10 000 kWh accumulated), fp error lands at ~1e-12, making MAD of an
+        # otherwise uniform peer group ~1e-13 instead of 0.  Any real change
+        # then scores z ~ 1e10 and gets flagged regardless of mad_factor.
+        # Treat MAD below 1 ppm of the median as degenerate.
+        if mad < max(1e-9, abs(median) * 1e-6):
             continue
         modified_z = 0.6745 * (c.change - median) / mad
         if abs(modified_z) >= mad_factor:

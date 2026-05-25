@@ -295,6 +295,23 @@ class TestAlgoMad:
         # Every time-of-day group has at most 1 non-zero member → all skipped
         assert flagged == []
 
+    def test_near_zero_mad_no_false_positive(self):
+        # Reproduces the real-world HA bug: change values derived from large cumulative
+        # sums have floating-point noise (~1e-13). When nearly all peers are 0.4 ± 1e-13,
+        # MAD ≈ 1e-13, and any value of 0.3 (legitimate lower-generation day) produces
+        # a z-score ~1e11 >> any mad_factor, causing massive false positives.
+        # The MAD floor must treat such near-zero MAD as degenerate and skip.
+        cands = []
+        for d in range(28):
+            # Simulate fp noise: alternating slightly above/below 0.4
+            change = 0.4 + (1 if d % 2 == 0 else -1) * 1e-13
+            cands.append(_hour(d * _DAY_MS + 12 * _HOUR_MS, change))
+        # Two legitimate lower-generation days: change=0.3 (not outliers)
+        cands.append(_hour(28 * _DAY_MS + 12 * _HOUR_MS, 0.3))
+        cands.append(_hour(29 * _DAY_MS + 12 * _HOUR_MS, 0.3))
+        flagged, _, _ = _algo_mad(cands, mad_factor=3.5)
+        assert flagged == [], "fp-noisy peers with near-zero MAD should not create false positives"
+
     def test_daily_reset_multiday_with_spike(self):
         # Solar sensor over 14 days: 8 nighttime zero-change hours + 8 varying
         # daytime hours, then a spike at 10:00 on day 14.
