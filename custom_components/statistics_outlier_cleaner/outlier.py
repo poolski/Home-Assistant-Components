@@ -109,15 +109,21 @@ async def _fetch_period(
     hass: HomeAssistant,
     statistic_id: str,
     period: Literal["hour", "5minute"],
-    lookback_days: int,
+    start_ts: float | None = None,
+    end_ts: float | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch raw statistics rows for one period via the recorder API."""
     recorder = get_instance(hass)
-    if lookback_days > 0:
-        start_time = dt_util.utcnow() - timedelta(days=lookback_days)
-    else:
-        start_time = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    end_time = dt_util.utcnow()
+    start_time = (
+        datetime.fromtimestamp(start_ts, tz=timezone.utc)
+        if start_ts is not None
+        else datetime(1970, 1, 1, tzinfo=timezone.utc)
+    )
+    end_time = (
+        datetime.fromtimestamp(end_ts, tz=timezone.utc)
+        if end_ts is not None
+        else dt_util.utcnow()
+    )
 
     raw = await recorder.async_add_executor_job(
         statistics_during_period,
@@ -191,7 +197,6 @@ def _algo_absolute(
 
 _DAY_MS = 24 * 3_600_000
 _HOUR_MS = 3_600_000
-_5MIN_MS = 300_000
 
 # Per-period clock-jitter tolerance for time-of-day peer matching.
 _TOD_TOLERANCE_MS: dict[str, int] = {
@@ -252,19 +257,19 @@ def _algo_mad(
                 peers.extend(tod_groups[key])
 
         nonzero_peers = [p for p in peers if p.change != 0]
-        stat_peers = nonzero_peers if nonzero_peers else peers
+        stat_peers = nonzero_peers if len(nonzero_peers) >= 2 else peers
         if len(stat_peers) < 2:
             continue
         values = [p.change for p in stat_peers]
         median = _median_sorted(sorted(values))
         mad = _median_sorted(sorted(abs(v - median) for v in values))
         # Guard against near-zero MAD from floating-point noise.
-        # HA computes `change` as sum[i] - sum[i-1]; when sums are large (e.g.
-        # 10 000 kWh accumulated), fp error lands at ~1e-12, making MAD of an
-        # otherwise uniform peer group ~1e-13 instead of 0.  Any real change
-        # then scores z ~ 1e10 and gets flagged regardless of mad_factor.
-        # Treat MAD below 1 ppm of the median as degenerate.
-        if mad < max(1e-9, abs(median) * 1e-6):
+        # HA computes `change` as sum[i] - sum[i-1]; for sums up to ~50 000 kWh
+        # fp error is ~1e-12, so any MAD >= 1e-9 reflects real variation.
+        # An absolute floor (rather than a median-relative one) avoids the
+        # regression where large medians (e.g. 1000 kWh) raise the floor to
+        # 0.001, suppressing genuine MAD values like 0.0005.
+        if mad < 1e-9:
             continue
         modified_z = 0.6745 * (c.change - median) / mad
         if abs(modified_z) >= mad_factor:
@@ -351,18 +356,24 @@ async def scan_outliers(
     threshold: float = 0.0,
     mad_factor: float = 6.0,
     lookback_days: int = 0,
+    start_ts: float | None = None,
+    end_ts: float | None = None,
 ) -> OutlierReport:
     """Run an outlier scan and return a report. No mutation."""
+    # start_ts/end_ts take precedence; convert lookback_days as a fallback
+    if start_ts is None and lookback_days > 0:
+        start_ts = (dt_util.utcnow() - timedelta(days=lookback_days)).timestamp()
+
     if period == "hour":
-        raw = await _fetch_period(hass, statistic_id, "hour", lookback_days)
+        raw = await _fetch_period(hass, statistic_id, "hour", start_ts=start_ts, end_ts=end_ts)
         candidates = _normalise_rows(raw, "hour")
     elif period == "5minute":
-        raw = await _fetch_period(hass, statistic_id, "5minute", lookback_days)
+        raw = await _fetch_period(hass, statistic_id, "5minute", start_ts=start_ts, end_ts=end_ts)
         rows = _normalise_rows(raw, "5minute")
         candidates = rows[1:] if rows else []
     else:  # hybrid
-        hour_raw = await _fetch_period(hass, statistic_id, "hour", lookback_days)
-        five_raw = await _fetch_period(hass, statistic_id, "5minute", lookback_days)
+        hour_raw = await _fetch_period(hass, statistic_id, "hour", start_ts=start_ts, end_ts=end_ts)
+        five_raw = await _fetch_period(hass, statistic_id, "5minute", start_ts=start_ts, end_ts=end_ts)
         candidates = _hybrid_rows(
             _normalise_rows(hour_raw, "hour"),
             _normalise_rows(five_raw, "5minute"),

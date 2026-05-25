@@ -611,8 +611,11 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     };
 
     if (startVal) {
-      const startMs = new Date(startVal).getTime();
-      params.lookback_days = Math.ceil((Date.now() - startMs) / 86_400_000);
+      params.start_ts = new Date(startVal).getTime() / 1000;
+    }
+    if (endVal) {
+      // Add 86400 so the selected end date is fully included (date input gives midnight UTC).
+      params.end_ts = new Date(endVal).getTime() / 1000 + 86_400;
     }
 
     if (method === "mad")      params.mad_factor = parseFloat(this._q("mad-factor").value) || 6;

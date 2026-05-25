@@ -292,7 +292,10 @@ class TestAlgoMad:
         candidates = [_hour(h * _HOUR_MS, 1.0) for h in range(24)]
         candidates.append(_hour(10 * _HOUR_MS + 1, 500.0))  # near hour 10 but unique tod
         flagged, _, _ = _algo_mad(candidates, mad_factor=3.0)
-        # Every time-of-day group has at most 1 non-zero member → all skipped
+        # tod slots are all unique (1-hour spacing >> tolerance), so each candidate
+        # has at most 1 peer in its window.  The near-hour-10 candidate is within
+        # tolerance of day-0's hour-10 entry (forming a 2-peer group), but their
+        # identical change values give MAD=0 → skipped by the degenerate-MAD guard.
         assert flagged == []
 
     def test_near_zero_mad_no_false_positive(self):
@@ -311,6 +314,33 @@ class TestAlgoMad:
         cands.append(_hour(29 * _DAY_MS + 12 * _HOUR_MS, 0.3))
         flagged, _, _ = _algo_mad(cands, mad_factor=3.5)
         assert flagged == [], "fp-noisy peers with near-zero MAD should not create false positives"
+
+    def test_high_median_genuine_outlier_not_suppressed_by_floor(self):
+        # Sensor with large change values (~1000 units/h) and very tight genuine variation.
+        # Relative floor abs(median)*1e-6 = 0.001 would suppress MAD≈0.0007, hiding the spike.
+        # The absolute floor (1e-9) must allow this genuine outlier through.
+        cands = [
+            _hour(d * _DAY_MS + 12 * _HOUR_MS, 1000.0 + (d - 14) * 0.0001)
+            for d in range(28)
+        ]
+        cands.append(_hour(28 * _DAY_MS + 12 * _HOUR_MS, 999_999.0))
+        flagged, _, _ = _algo_mad(cands, mad_factor=6.0)
+        assert any(c.change == 999_999.0 for c in flagged), (
+            "genuine outlier on high-median sensor must be flagged even when MAD is "
+            "small relative to median"
+        )
+
+    def test_near_zero_mad_no_false_positive_5minute(self):
+        # Same fp-noise scenario as the hourly version but with 5-minute candidates.
+        # Ensures the MAD floor applies regardless of period type.
+        cands = []
+        for d in range(28):
+            change = 0.4 + (1 if d % 2 == 0 else -1) * 1e-13
+            cands.append(_five_min(d * _DAY_MS + 12 * _HOUR_MS, change))
+        cands.append(_five_min(28 * _DAY_MS + 12 * _HOUR_MS, 0.3))
+        cands.append(_five_min(29 * _DAY_MS + 12 * _HOUR_MS, 0.3))
+        flagged, _, _ = _algo_mad(cands, mad_factor=3.5)
+        assert flagged == [], "fp-noisy 5-minute peers must not create false positives"
 
     def test_daily_reset_multiday_with_spike(self):
         # Solar sensor over 14 days: 8 nighttime zero-change hours + 8 varying

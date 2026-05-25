@@ -14,7 +14,6 @@ from homeassistant.components.recorder import get_instance
 from homeassistant.core import HomeAssistant, callback
 
 from .const import (
-    DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAD_FACTOR,
     DEFAULT_METHOD,
     DEFAULT_PERIOD,
@@ -84,9 +83,8 @@ async def ws_list_sum_statistics(
         vol.Optional("mad_factor", default=DEFAULT_MAD_FACTOR): vol.All(
             vol.Coerce(float), vol.Range(min=0.1)
         ),
-        vol.Optional("lookback_days", default=DEFAULT_LOOKBACK_DAYS): vol.All(
-            int, vol.Range(min=0)
-        ),
+        vol.Optional("start_ts"): vol.Any(None, vol.Coerce(float)),
+        vol.Optional("end_ts"): vol.Any(None, vol.Coerce(float)),
     }
 )
 @websocket_api.async_response
@@ -105,7 +103,8 @@ async def ws_fetch_outliers(
             top_n=msg["top_n"],
             threshold=msg["threshold"],
             mad_factor=msg["mad_factor"],
-            lookback_days=msg["lookback_days"],
+            start_ts=msg.get("start_ts"),
+            end_ts=msg.get("end_ts"),
         )
     except ValueError as exc:
         connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(exc))
