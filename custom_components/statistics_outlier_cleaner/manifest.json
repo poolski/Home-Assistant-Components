@@ -1,7 +1,7 @@
 {
   "domain": "statistics_outlier_cleaner",
   "name": "Statistics Outlier Cleaner",
-  "documentation": "https://github.com/poolski/Home-Assistant-Components",
+  "documentation": "https://github.com/poolski/Home-Assistant-Components/blob/main/docs/statistics_outlier_cleaner.md",
   "issue_tracker": "https://github.com/poolski/Home-Assistant-Components/issues",
   "version": "0.1.13",
   "codeowners": ["@poolski"],
