@@ -1223,6 +1223,8 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
           this._q("apply-area").classList.add("hidden");
         }
         this._loadHistory();
+        await this._fetchSeries(this._statId || statId, this._scanStartTs, this._scanEndTs);
+        this._renderChart();
       }
     } catch (e) {
       this._showStatus("error", `Apply failed: ${e.message || JSON.stringify(e)}`);
