@@ -424,6 +424,13 @@ const STYLES = `
   }
   .apply-summary strong { color: var(--error-color, #db4437); }
   code { font-family: monospace; background: var(--secondary-background-color, #f5f5f5); padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
+  #chart-container {
+    margin: 0 0 14px;
+  }
+  #chart-container ha-chart-base {
+    display: block;
+    width: 100%;
+  }
 `;
 
 class StatisticsOutlierCleanerPanel extends HTMLElement {
@@ -440,6 +447,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._allStats = [];      // full list from WS
     this._activeIdx = -1;     // keyboard nav index in dropdown
     this._recentStats = this._loadRecentStats();
+    this._series = [];
+    this._chartEl = null;
+    this._scanStartTs = null;
+    this._scanEndTs = null;
     this._onDocClick = (e) => {
       if (!this.shadowRoot.contains(e.target)) this._closeDropdown();
     };
@@ -577,6 +588,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       <div id="results-card" class="card hidden">
         <h3>Detected Outliers</h3>
         <div id="scan-stats-row" class="scan-stats-row hidden"></div>
+        <div id="chart-container" class="hidden"></div>
         <details id="scan-detail" class="hidden" style="margin-bottom:10px">
           <summary style="cursor:pointer;font-size:0.75rem;color:var(--secondary-text-color);user-select:none">Statistical detail</summary>
           <div id="scan-meta" class="meta" style="margin-top:4px"></div>
