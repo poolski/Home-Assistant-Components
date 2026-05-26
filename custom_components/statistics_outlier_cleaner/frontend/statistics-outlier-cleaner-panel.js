@@ -1022,14 +1022,21 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     if (method === "absolute") params.threshold  = parseFloat(this._q("threshold").value) || 0;
     if (method === "top_n")    params.top_n      = parseInt(this._q("top-n").value) || 10;
 
+    this._scanStartTs = params.start_ts || (Date.now() / 1000 - 86_400 * 30);
+    this._scanEndTs = params.end_ts || (Date.now() / 1000);
+
     this._showStatus("info", "Scanning…");
     this._q("btn-scan").disabled = true;
 
     try {
-      const result = await this._send(params);
+      const [result] = await Promise.all([
+        this._send(params),
+        this._fetchSeries(statId, this._scanStartTs, this._scanEndTs),
+      ]);
       this._candidates = result.candidates || [];
       this._selected = new Set(this._candidates.map((_, i) => i));
       this._renderResults(result);
+      this._renderChart();
       this._clearStatus();
       const statMeta = this._allStats.find((s) => s.statistic_id === statId);
       this._saveRecentStat(statId, statMeta?.name || null);
