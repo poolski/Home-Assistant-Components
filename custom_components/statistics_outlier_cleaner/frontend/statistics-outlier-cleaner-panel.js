@@ -844,6 +844,27 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     return this._hass.connection.sendMessagePromise({ id: this._msgId++, ...msg });
   }
 
+  async _fetchSeries(statId, startTs, endTs) {
+    try {
+      const result = await this._hass.connection.sendMessagePromise({
+        id: this._msgId++,
+        type: "recorder/statistics_during_period",
+        start_time: new Date(startTs * 1000).toISOString(),
+        end_time: new Date(endTs * 1000).toISOString(),
+        statistic_ids: [statId],
+        period: "hour",
+        types: ["sum"],
+      });
+      const rows = result[statId] || [];
+      this._series = rows
+        .filter(r => r.sum != null)
+        .map(r => ({ start: r.start, sum: r.sum }));
+    } catch (e) {
+      console.warn("[outlier-cleaner] series fetch failed:", e);
+      this._series = [];
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Scan
   // ---------------------------------------------------------------------------
