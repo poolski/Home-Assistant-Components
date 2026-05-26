@@ -424,13 +424,6 @@ const STYLES = `
   }
   .apply-summary strong { color: var(--error-color, #db4437); }
   code { font-family: monospace; background: var(--secondary-background-color, #f5f5f5); padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
-  #chart-container {
-    margin: 0 0 14px;
-  }
-  #chart-container ha-chart-base {
-    display: block;
-    width: 100%;
-  }
 `;
 
 class StatisticsOutlierCleanerPanel extends HTMLElement {
@@ -447,10 +440,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._allStats = [];      // full list from WS
     this._activeIdx = -1;     // keyboard nav index in dropdown
     this._recentStats = this._loadRecentStats();
-    this._series = [];
-    this._chartEl = null;
-    this._scanStartTs = null;
-    this._scanEndTs = null;
     this._onDocClick = (e) => {
       if (!this.shadowRoot.contains(e.target)) this._closeDropdown();
     };
@@ -588,7 +577,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       <div id="results-card" class="card hidden">
         <h3>Detected Outliers</h3>
         <div id="scan-stats-row" class="scan-stats-row hidden"></div>
-        <div id="chart-container" class="hidden"></div>
         <details id="scan-detail" class="hidden" style="margin-bottom:10px">
           <summary style="cursor:pointer;font-size:0.75rem;color:var(--secondary-text-color);user-select:none">Statistical detail</summary>
           <div id="scan-meta" class="meta" style="margin-top:4px"></div>
@@ -844,156 +832,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     return this._hass.connection.sendMessagePromise({ id: this._msgId++, ...msg });
   }
 
-  async _fetchSeries(statId, startTs, endTs) {
-    try {
-      const result = await this._hass.connection.sendMessagePromise({
-        id: this._msgId++,
-        type: "recorder/statistics_during_period",
-        start_time: new Date(startTs * 1000).toISOString(),
-        end_time: new Date(endTs * 1000).toISOString(),
-        statistic_ids: [statId],
-        period: "hour",
-        types: ["sum"],
-      });
-      const rows = result[statId] || [];
-      this._series = rows
-        .filter(r => r.sum != null)
-        .map(r => ({ start: new Date(r.start).getTime(), sum: r.sum }));
-    } catch (e) {
-      console.warn("[outlier-cleaner] series fetch failed:", e);
-      this._series = [];
-    }
-  }
-
-  _computeAfterSeries() {
-    const replacement = parseFloat(this._q("replacement")?.value ?? "0") || 0;
-    const sums = this._series.map(r => r.sum);
-    const selected = [...this._selected]
-      .map(i => this._candidates[i])
-      .sort((a, b) => a.start - b.start);
-    for (const c of selected) {
-      const delta = replacement - c.change;
-      const idx = this._series.findIndex(r => r.start >= c.start);
-      if (idx === -1) continue;
-      for (let j = idx; j < sums.length; j++) sums[j] += delta;
-    }
-    return sums;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Chart
-  // ---------------------------------------------------------------------------
-
-  async _renderChart() {
-    const container = this._q("chart-container");
-    if (!container || !this._series.length) return;
-
-    try {
-      await Promise.race([
-        customElements.whenDefined("ha-chart-base"),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), 3000)
-        ),
-      ]);
-    } catch (_) {
-      console.warn("[outlier-cleaner] ha-chart-base unavailable, skipping chart");
-      return;
-    }
-
-    const labels = this._series.map(r =>
-      new Date(r.start).toLocaleString([], {
-        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-      })
-    );
-    const beforeSums = this._series.map(r => r.sum);
-    const afterSums = this._computeAfterSeries();
-
-    const candidateMs = new Set(this._candidates.map(c => c.start));
-    const selectedMs = new Set([...this._selected].map(i => this._candidates[i].start));
-    const pointRadius = this._series.map(r =>
-      candidateMs.has(r.start) ? 5 : 0
-    );
-    const pointBgColor = this._series.map(r => {
-      const ms = r.start;
-      if (!candidateMs.has(ms)) return "transparent";
-      return selectedMs.has(ms) ? "#ef4444" : "transparent";
-    });
-    const pointBorderColor = this._series.map(r =>
-      candidateMs.has(r.start) ? "#ef4444" : "transparent"
-    );
-
-    const el = document.createElement("ha-chart-base");
-    // Connect to DOM before setting data so Lit can initialise with hass context.
-    container.innerHTML = "";
-    container.appendChild(el);
-    container.classList.remove("hidden");
-
-    el.hass = this._hass;
-    el.chartType = "line";
-    el.data = {
-      labels,
-      datasets: [
-        {
-          label: "Before",
-          data: beforeSums,
-          borderColor: "#ef4444",
-          borderDash: [5, 4],
-          borderWidth: 1.5,
-          pointRadius,
-          pointBackgroundColor: pointBgColor,
-          pointBorderColor,
-          pointBorderWidth: 2,
-          tension: 0,
-          fill: false,
-        },
-        {
-          label: "After (simulated)",
-          data: afterSums,
-          borderColor: "#4ade80",
-          borderWidth: 1.5,
-          pointRadius: 0,
-          tension: 0,
-          fill: false,
-        },
-      ],
-    };
-    el.options = {
-      animation: false,
-      responsive: true,
-      maintainAspectRatio: true,
-      aspectRatio: 3,
-      plugins: {
-        legend: { display: false },
-        tooltip: { mode: "index", intersect: false },
-      },
-      scales: {
-        x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
-        y: { beginAtZero: false },
-      },
-    };
-
-    this._chartEl = el;
-  }
-
-  _updateChart() {
-    if (!this._chartEl || !this._series.length) return;
-    const afterSums = this._computeAfterSeries();
-    const selectedMs = new Set([...this._selected].map(i => this._candidates[i].start));
-    const candidateMs = new Set(this._candidates.map(c => c.start));
-    const pointBgColor = this._series.map(r => {
-      const ms = r.start;
-      if (!candidateMs.has(ms)) return "transparent";
-      return selectedMs.has(ms) ? "#ef4444" : "transparent";
-    });
-    this._chartEl.data = {
-      labels: this._chartEl.data.labels,
-      datasets: [
-        { ...this._chartEl.data.datasets[0], pointBackgroundColor: pointBgColor },
-        { ...this._chartEl.data.datasets[1], data: afterSums },
-      ],
-    };
-  }
-
   // ---------------------------------------------------------------------------
   // Scan
   // ---------------------------------------------------------------------------
@@ -1025,21 +863,14 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     if (method === "absolute") params.threshold  = parseFloat(this._q("threshold").value) || 0;
     if (method === "top_n")    params.top_n      = parseInt(this._q("top-n").value) || 10;
 
-    this._scanStartTs = params.start_ts || (Date.now() / 1000 - 86_400 * 30);
-    this._scanEndTs = params.end_ts || (Date.now() / 1000);
-
     this._showStatus("info", "Scanning…");
     this._q("btn-scan").disabled = true;
 
     try {
-      const [result] = await Promise.all([
-        this._send(params),
-        this._fetchSeries(statId, this._scanStartTs, this._scanEndTs),
-      ]);
+      const result = await this._send(params);
       this._candidates = result.candidates || [];
       this._selected = new Set(this._candidates.map((_, i) => i));
       this._renderResults(result);
-      this._renderChart();
       this._clearStatus();
       const statMeta = this._allStats.find((s) => s.statistic_id === statId);
       this._saveRecentStat(statId, statMeta?.name || null);
@@ -1106,7 +937,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       ? `Preview: would replace <strong>${n} reading${n !== 1 ? "s" : ""}</strong> with <strong>${replacement}</strong> — no DB changes`
       : `Replace <strong>${n} reading${n !== 1 ? "s" : ""}</strong> with <strong>${replacement}</strong>`;
     applyBtn.textContent = isDry ? `Preview ${n} rows` : `Apply to ${n} rows`;
-    this._updateChart();
   }
 
   _renderTable() {
@@ -1226,8 +1056,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
           this._q("apply-area").classList.add("hidden");
         }
         this._loadHistory();
-        await this._fetchSeries(this._statId || statId, this._scanStartTs, this._scanEndTs);
-        this._renderChart();
       }
     } catch (e) {
       this._showStatus("error", `Apply failed: ${e.message || JSON.stringify(e)}`);
