@@ -1,4 +1,4 @@
-# Statistics Outlier Cleaner
+# Home Assistant Statistics Outlier Cleanup
 
 [![HACS Badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/release/poolski/Home-Assistant-Components.svg)](https://github.com/poolski/Home-Assistant-Components/releases)
