@@ -883,6 +883,117 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   }
 
   // ---------------------------------------------------------------------------
+  // Chart
+  // ---------------------------------------------------------------------------
+
+  async _renderChart() {
+    const container = this._q("chart-container");
+    if (!container || !this._series.length) return;
+
+    try {
+      await Promise.race([
+        customElements.whenDefined("ha-chart-base"),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 3000)
+        ),
+      ]);
+    } catch (_) {
+      console.warn("[outlier-cleaner] ha-chart-base unavailable, skipping chart");
+      return;
+    }
+
+    const labels = this._series.map(r =>
+      new Date(r.start).toLocaleString([], {
+        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+      })
+    );
+    const beforeSums = this._series.map(r => r.sum);
+    const afterSums = this._computeAfterSeries();
+
+    const candidateMs = new Set(this._candidates.map(c => c.start));
+    const selectedMs = new Set([...this._selected].map(i => this._candidates[i].start));
+    const pointRadius = this._series.map(r =>
+      candidateMs.has(new Date(r.start).getTime()) ? 5 : 0
+    );
+    const pointBgColor = this._series.map(r => {
+      const ms = new Date(r.start).getTime();
+      if (!candidateMs.has(ms)) return "transparent";
+      return selectedMs.has(ms) ? "#ef4444" : "transparent";
+    });
+    const pointBorderColor = this._series.map(r =>
+      candidateMs.has(new Date(r.start).getTime()) ? "#ef4444" : "transparent"
+    );
+
+    const el = document.createElement("ha-chart-base");
+    el.chartType = "line";
+    el.data = {
+      labels,
+      datasets: [
+        {
+          label: "Before",
+          data: beforeSums,
+          borderColor: "#ef4444",
+          borderDash: [5, 4],
+          borderWidth: 1.5,
+          pointRadius,
+          pointBackgroundColor: pointBgColor,
+          pointBorderColor,
+          pointBorderWidth: 2,
+          tension: 0,
+          fill: false,
+        },
+        {
+          label: "After (simulated)",
+          data: afterSums,
+          borderColor: "#4ade80",
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0,
+          fill: false,
+        },
+      ],
+    };
+    el.options = {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: true,
+      aspectRatio: 3,
+      plugins: {
+        legend: { display: false },
+        tooltip: { mode: "index", intersect: false },
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
+        y: { beginAtZero: false },
+      },
+    };
+
+    container.innerHTML = "";
+    this._chartEl = el;
+    container.appendChild(el);
+    container.classList.remove("hidden");
+  }
+
+  _updateChart() {
+    if (!this._chartEl || !this._series.length) return;
+    const afterSums = this._computeAfterSeries();
+    const selectedMs = new Set([...this._selected].map(i => this._candidates[i].start));
+    const candidateMs = new Set(this._candidates.map(c => c.start));
+    const pointBgColor = this._series.map(r => {
+      const ms = new Date(r.start).getTime();
+      if (!candidateMs.has(ms)) return "transparent";
+      return selectedMs.has(ms) ? "#ef4444" : "transparent";
+    });
+    this._chartEl.data = {
+      labels: this._chartEl.data.labels,
+      datasets: [
+        { ...this._chartEl.data.datasets[0], pointBackgroundColor: pointBgColor },
+        { ...this._chartEl.data.datasets[1], data: afterSums },
+      ],
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Scan
   // ---------------------------------------------------------------------------
 
