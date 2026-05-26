@@ -1,9 +1,9 @@
 # Home Assistant Statistics Outlier Cleanup
 
 [![HACS Badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![GitHub Release](https://img.shields.io/github/release/poolski/Home-Assistant-Components.svg)](https://github.com/poolski/Home-Assistant-Components/releases)
+[![GitHub Release](https://img.shields.io/github/release/poolski/homeassistant-outlier-cleaner.svg)](https://github.com/poolski/homeassistant-outlier-cleaner/releases)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=poolski&repository=Home-Assistant-Components&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=poolski&repository=homeassistant-outlier-cleaner&category=integration)
 
 A Home Assistant custom integration for detecting and fixing outlier spikes in long-term statistics — the kind caused by HA restarts, meter replacements, or recorder compaction bugs.
 
