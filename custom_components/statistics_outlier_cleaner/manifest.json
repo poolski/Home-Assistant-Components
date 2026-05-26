@@ -1,17 +1,17 @@
 {
   "domain": "statistics_outlier_cleaner",
   "name": "Statistics Outlier Cleaner",
-  "documentation": "https://github.com/poolski/Home-Assistant-Components",
-  "issue_tracker": "https://github.com/poolski/Home-Assistant-Components/issues",
-  "version": "0.1.16",
   "codeowners": ["@poolski"],
   "config_flow": false,
   "dependencies": [
-    "http",
     "frontend",
+    "http",
     "panel_custom",
     "recorder",
     "websocket_api"
   ],
-  "iot_class": "local_polling"
+  "documentation": "https://github.com/poolski/Home-Assistant-Components",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/poolski/Home-Assistant-Components/issues",
+  "version": "0.1.16"
 }
