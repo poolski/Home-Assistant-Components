@@ -1103,6 +1103,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       ? `Preview: would replace <strong>${n} reading${n !== 1 ? "s" : ""}</strong> with <strong>${replacement}</strong> — no DB changes`
       : `Replace <strong>${n} reading${n !== 1 ? "s" : ""}</strong> with <strong>${replacement}</strong>`;
     applyBtn.textContent = isDry ? `Preview ${n} rows` : `Apply to ${n} rows`;
+    this._updateChart();
   }
 
   _renderTable() {
