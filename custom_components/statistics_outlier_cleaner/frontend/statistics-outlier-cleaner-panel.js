@@ -865,6 +865,23 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     }
   }
 
+  _computeAfterSeries() {
+    const replacement = parseFloat(this._q("replacement")?.value ?? "0") || 0;
+    const sums = this._series.map(r => r.sum);
+    const selected = [...this._selected]
+      .map(i => this._candidates[i])
+      .sort((a, b) => a.start - b.start);
+    for (const c of selected) {
+      const delta = replacement - c.change;
+      const idx = this._series.findIndex(
+        r => new Date(r.start).getTime() >= c.start
+      );
+      if (idx === -1) continue;
+      for (let j = idx; j < sums.length; j++) sums[j] += delta;
+    }
+    return sums;
+  }
+
   // ---------------------------------------------------------------------------
   // Scan
   // ---------------------------------------------------------------------------
