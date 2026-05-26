@@ -923,6 +923,12 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     );
 
     const el = document.createElement("ha-chart-base");
+    // Connect to DOM before setting data so Lit can initialise with hass context.
+    container.innerHTML = "";
+    container.appendChild(el);
+    container.classList.remove("hidden");
+
+    el.hass = this._hass;
     el.chartType = "line";
     el.data = {
       labels,
@@ -966,10 +972,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       },
     };
 
-    container.innerHTML = "";
     this._chartEl = el;
-    container.appendChild(el);
-    container.classList.remove("hidden");
   }
 
   _updateChart() {
