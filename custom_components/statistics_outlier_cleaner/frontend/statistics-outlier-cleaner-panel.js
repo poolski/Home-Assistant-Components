@@ -858,7 +858,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       const rows = result[statId] || [];
       this._series = rows
         .filter(r => r.sum != null)
-        .map(r => ({ start: r.start, sum: r.sum }));
+        .map(r => ({ start: new Date(r.start).getTime(), sum: r.sum }));
     } catch (e) {
       console.warn("[outlier-cleaner] series fetch failed:", e);
       this._series = [];
@@ -873,9 +873,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       .sort((a, b) => a.start - b.start);
     for (const c of selected) {
       const delta = replacement - c.change;
-      const idx = this._series.findIndex(
-        r => new Date(r.start).getTime() >= c.start
-      );
+      const idx = this._series.findIndex(r => r.start >= c.start);
       if (idx === -1) continue;
       for (let j = idx; j < sums.length; j++) sums[j] += delta;
     }
@@ -913,15 +911,15 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const candidateMs = new Set(this._candidates.map(c => c.start));
     const selectedMs = new Set([...this._selected].map(i => this._candidates[i].start));
     const pointRadius = this._series.map(r =>
-      candidateMs.has(new Date(r.start).getTime()) ? 5 : 0
+      candidateMs.has(r.start) ? 5 : 0
     );
     const pointBgColor = this._series.map(r => {
-      const ms = new Date(r.start).getTime();
+      const ms = r.start;
       if (!candidateMs.has(ms)) return "transparent";
       return selectedMs.has(ms) ? "#ef4444" : "transparent";
     });
     const pointBorderColor = this._series.map(r =>
-      candidateMs.has(new Date(r.start).getTime()) ? "#ef4444" : "transparent"
+      candidateMs.has(r.start) ? "#ef4444" : "transparent"
     );
 
     const el = document.createElement("ha-chart-base");
@@ -980,7 +978,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const selectedMs = new Set([...this._selected].map(i => this._candidates[i].start));
     const candidateMs = new Set(this._candidates.map(c => c.start));
     const pointBgColor = this._series.map(r => {
-      const ms = new Date(r.start).getTime();
+      const ms = r.start;
       if (!candidateMs.has(ms)) return "transparent";
       return selectedMs.has(ms) ? "#ef4444" : "transparent";
     });
