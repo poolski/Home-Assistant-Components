@@ -91,6 +91,9 @@ const WS = {
 const STYLES = `
   :host {
     display: block;
+    height: 100%;
+    overflow-y: auto;
+    box-sizing: border-box;
     padding: 16px;
     font-family: var(--paper-font-body1_-_font-family, inherit);
     color: var(--primary-text-color);
@@ -437,6 +440,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._allStats = [];      // full list from WS
     this._activeIdx = -1;     // keyboard nav index in dropdown
     this._recentStats = this._loadRecentStats();
+    this._onDocClick = (e) => {
+      if (!this.shadowRoot.contains(e.target)) this._closeDropdown();
+    };
+  }
+
+  disconnectedCallback() {
+    document.removeEventListener("click", this._onDocClick);
   }
 
   set hass(hass) {
@@ -628,10 +638,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     input.addEventListener("input", () => this._onStatInput());
     input.addEventListener("keydown", (e) => this._onStatKeydown(e));
     input.addEventListener("focus", () => this._showDropdown(input.value));
-    // Close dropdown when clicking outside
-    document.addEventListener("click", (e) => {
-      if (!this.shadowRoot.contains(e.target)) this._closeDropdown();
-    });
+    document.addEventListener("click", this._onDocClick);
   }
 
   _q(id) { return this.shadowRoot.getElementById(id); }
